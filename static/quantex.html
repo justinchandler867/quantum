@@ -1,0 +1,2182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quantex — Portfolio Intelligence Platform</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:'DM Sans',sans-serif;background:#0a0e1a;color:#c8d2e0;font-size:13px;-webkit-font-smoothing:antialiased}
+#root{height:100vh;display:flex;flex-direction:column}
+/* Topbar */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;background:linear-gradient(180deg,#0f1424 0%,#0b0f1e 100%);border-bottom:1px solid rgba(99,102,241,.12);flex-shrink:0}
+.logo{font-family:'Outfit',sans-serif;font-size:18px;font-weight:700;letter-spacing:4px;background:linear-gradient(135deg,#818cf8 0%,#6366f1 50%,#a78bfa 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.mkt{display:flex;gap:16px}
+.mkt-item{display:flex;flex-direction:column;align-items:center;gap:1px}
+.mkt-lbl{font-size:9px;color:#475569;font-weight:500;letter-spacing:.5px}
+.mkt-val{font-size:11px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.chip{display:flex;gap:6px;align-items:center;padding:5px 14px;background:rgba(99,102,241,.08);border-radius:20px;font-size:11px;cursor:pointer;border:1px solid rgba(99,102,241,.2);color:#c8d2e0;transition:all .2s;font-weight:500}
+.chip:hover{border-color:rgba(99,102,241,.5);background:rgba(99,102,241,.14)}
+/* Stats bar */
+.sbar{display:flex;overflow-x:auto;background:rgba(15,20,36,.6);border-bottom:1px solid rgba(99,102,241,.08);flex-shrink:0;backdrop-filter:blur(10px)}
+.sb-item{display:flex;flex-direction:column;align-items:center;padding:6px 16px;border-right:1px solid rgba(99,102,241,.06);flex-shrink:0}
+.sb-lbl{font-size:8px;color:#4a5568;letter-spacing:1px;font-weight:600;text-transform:uppercase}
+.sb-val{font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace}
+.up{color:#34d399}.dn{color:#f87171}.wa{color:#fbbf24}
+/* Nav */
+.nav{display:flex;background:rgba(15,20,36,.8);border-bottom:1px solid rgba(99,102,241,.08);overflow-x:auto;flex-shrink:0;gap:2px;padding:0 8px;backdrop-filter:blur(10px)}
+.nav-tab{padding:9px 16px;font-size:11px;color:#4a5568;cursor:pointer;border:none;background:none;border-bottom:2px solid transparent;font-family:'DM Sans',sans-serif;white-space:nowrap;font-weight:600;transition:all .2s;letter-spacing:.3px}
+.nav-tab:hover{color:#94a3b8;background:rgba(99,102,241,.04)}
+.nav-tab.active{color:#a5b4fc;border-bottom-color:#6366f1;background:rgba(99,102,241,.06)}
+.nav-tab.locked{color:#1e293b;cursor:not-allowed}
+.nav-tab.done{color:#34d399}
+/* Layout */
+.body{display:flex;flex:1;overflow:hidden}
+.main{flex:1;overflow-y:auto;padding:16px;background:linear-gradient(180deg,#0a0e1a 0%,#080c17 100%)}
+.side{width:270px;flex-shrink:0;border-left:1px solid rgba(99,102,241,.08);display:flex;flex-direction:column;background:rgba(10,14,26,.95);backdrop-filter:blur(10px)}
+/* Cards */
+.card{background:rgba(15,20,40,.6);border:1px solid rgba(99,102,241,.1);border-radius:12px;padding:14px;margin-bottom:12px;backdrop-filter:blur(8px);transition:border-color .2s}
+.card:hover{border-color:rgba(99,102,241,.18)}
+.card-title{font-size:10px;font-weight:700;letter-spacing:1.5px;color:#6366f1;margin-bottom:10px;text-transform:uppercase;font-family:'DM Sans',sans-serif}
+/* Buttons */
+.btn{padding:7px 16px;border:1px solid rgba(99,102,241,.15);border-radius:8px;background:rgba(15,20,40,.6);color:#94a3b8;font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600;transition:all .2s}
+.btn:hover:not([disabled]){background:rgba(99,102,241,.1);color:#e2e8f0;border-color:rgba(99,102,241,.3)}
+.btn[disabled]{opacity:.3;cursor:not-allowed}
+.btn-p{background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;border-color:transparent;box-shadow:0 2px 12px rgba(99,102,241,.25)}
+.btn-p:hover:not([disabled]){background:linear-gradient(135deg,#818cf8,#6366f1);box-shadow:0 4px 20px rgba(99,102,241,.35)}
+.btn-s{background:rgba(16,185,129,.1);color:#6ee7b7;border-color:rgba(16,185,129,.25)}
+.btn-d{background:rgba(239,68,68,.08);color:#fca5a5;border-color:rgba(239,68,68,.2)}
+.btn-g{background:none;border-color:transparent;color:#475569}
+.btn-g:hover{color:#94a3b8}
+.btn-sm{padding:4px 10px;font-size:10px}
+.btn-xs{padding:3px 8px;font-size:9px;border-radius:6px}
+.btn-full{width:100%}
+/* Onboard */
+.ow{max-width:620px;margin:0 auto;padding:12px 0}
+.prog{display:flex;align-items:center;margin-bottom:24px}
+.prog-dot{width:24px;height:24px;border-radius:50%;border:1px solid rgba(99,102,241,.2);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;transition:all .3s}
+.prog-step{display:flex;align-items:center;gap:6px;font-size:11px;color:#4a5568;font-weight:500}
+.prog-step.active .prog-dot{background:linear-gradient(135deg,#6366f1,#818cf8);color:#fff;border-color:transparent;box-shadow:0 2px 12px rgba(99,102,241,.4)}
+.prog-step.active{color:#a5b4fc}
+.prog-step.done .prog-dot{background:linear-gradient(135deg,#059669,#34d399);color:#fff;border-color:transparent}
+.prog-step.done{color:#34d399}
+.prog-line{flex:1;height:2px;background:rgba(99,102,241,.1);margin:0 10px;border-radius:1px}
+.prog-line.done{background:linear-gradient(90deg,#059669,#34d399)}
+.step-card{background:rgba(15,20,40,.6);border:1px solid rgba(99,102,241,.12);border-radius:16px;padding:28px;backdrop-filter:blur(8px)}
+.step-title{font-family:'Outfit',sans-serif;font-size:22px;font-weight:700;color:#f1f5f9;margin-bottom:6px}
+.step-sub{font-size:13px;color:#64748b;margin-bottom:20px;line-height:1.7}
+.goal-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
+.goal-card{padding:16px;background:rgba(10,14,26,.6);border:1px solid rgba(99,102,241,.1);border-radius:12px;cursor:pointer;transition:all .2s}
+.goal-card:hover{border-color:rgba(99,102,241,.3);transform:translateY(-1px)}
+.goal-card.selected{border-color:#6366f1;background:rgba(99,102,241,.08);box-shadow:0 0 20px rgba(99,102,241,.15)}
+.goal-icon{font-size:22px;margin-bottom:8px}
+.goal-name{font-size:14px;font-weight:600;color:#f1f5f9;margin-bottom:4px}
+.goal-desc{font-size:11px;color:#64748b;line-height:1.5}
+.q-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}
+.q-item{display:flex;flex-direction:column;gap:5px}
+.q-label{font-size:9px;font-weight:700;color:#6366f1;letter-spacing:1px}
+.q-sel{padding:8px 10px;background:rgba(10,14,26,.6);border:1px solid rgba(99,102,241,.12);border-radius:8px;color:#c8d2e0;font-size:12px;font-family:'DM Sans',sans-serif;cursor:pointer;width:100%;transition:border-color .2s}
+.q-sel:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+.profile-result{background:rgba(10,14,26,.6);border-radius:12px;padding:20px;border:1px solid rgba(99,102,241,.1)}
+.score-big{font-family:'Outfit',sans-serif;font-size:48px;font-weight:800;line-height:1}
+.score-cat{font-family:'Outfit',sans-serif;font-size:15px;font-weight:600;margin:4px 0 16px}
+.alloc-row{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.alloc-lbl{font-size:10px;color:#64748b;width:85px;flex-shrink:0;font-weight:500}
+.alloc-bar{flex:1;height:7px;background:rgba(15,20,40,.6);border-radius:4px;overflow:hidden}
+.alloc-fill{height:100%;border-radius:4px}
+.alloc-pct{font-size:10px;font-weight:700;width:30px;text-align:right;font-family:'JetBrains Mono',monospace}
+.elig-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:12px}
+.elig-box{padding:7px 9px;background:rgba(15,20,40,.4);border-radius:6px;border:1px solid rgba(99,102,241,.06)}
+.elig-lbl{font-size:9px;color:#4a5568;margin-bottom:2px;font-weight:500}
+.elig-val{font-size:10px;font-weight:700;font-family:'JetBrains Mono',monospace}
+.elig-yes{color:#34d399}.elig-no{color:#f87171}
+.flag-box{background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.2);border-radius:8px;padding:8px 10px;font-size:11px;color:#fbbf24;line-height:1.5;margin-top:6px}
+.step-nav{display:flex;justify-content:space-between;margin-top:20px}
+/* Discovery */
+.type-tabs{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px}
+.type-tab{padding:4px 12px;border:1px solid rgba(99,102,241,.1);border-radius:20px;font-size:10px;cursor:pointer;background:none;color:#4a5568;font-family:'DM Sans',sans-serif;font-weight:600;transition:all .2s}
+.type-tab:hover{color:#94a3b8;border-color:rgba(99,102,241,.3)}
+.type-tab.active{background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;border-color:transparent;box-shadow:0 2px 8px rgba(99,102,241,.3)}
+.search-input{padding:8px 12px;background:rgba(15,20,40,.6);border:1px solid rgba(99,102,241,.1);border-radius:8px;color:#c8d2e0;font-size:12px;font-family:'DM Sans',sans-serif;width:100%;outline:none;transition:all .2s}
+.search-input:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+.tbl-wrap{overflow-x:auto;overflow-y:auto;max-height:460px;border:1px solid rgba(99,102,241,.08);border-radius:10px}
+.dtbl{width:100%;border-collapse:collapse;font-size:12px}
+.dtbl th{font-size:9px;font-weight:700;color:#6366f1;padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.1);text-align:left;white-space:nowrap;cursor:pointer;background:rgba(15,20,40,.8);position:sticky;top:0;letter-spacing:.5px;backdrop-filter:blur(8px)}
+.dtbl th:hover{color:#a5b4fc}
+.dtbl td{padding:7px 10px;border-bottom:1px solid rgba(99,102,241,.04);white-space:nowrap;font-family:'JetBrains Mono',monospace;font-size:11px}
+.dtbl tr:hover td{background:rgba(99,102,241,.04)}
+.fit-badge{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:10px;font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace}
+.fit-high{background:rgba(52,211,153,.1);color:#34d399;border:1px solid rgba(52,211,153,.3)}
+.fit-mid{background:rgba(251,191,36,.08);color:#fbbf24;border:1px solid rgba(251,191,36,.25)}
+.fit-low{background:rgba(248,113,113,.08);color:#f87171;border:1px solid rgba(248,113,113,.2)}
+.type-badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:9px;font-weight:600;font-family:'DM Sans',sans-serif}
+/* Builder */
+.builder-layout{display:flex;gap:14px}
+.builder-left{width:260px;flex-shrink:0}
+.builder-right{flex:1;min-width:0}
+.stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.stat-box{background:rgba(15,20,40,.5);border:1px solid rgba(99,102,241,.08);border-radius:10px;padding:10px 12px;transition:all .2s;position:relative}
+.stat-box:hover{border-color:rgba(99,102,241,.2);background:rgba(15,20,40,.7)}
+.stat-lbl{font-size:9px;color:#6366f1;letter-spacing:.8px;margin-bottom:3px;font-weight:600;display:flex;align-items:center}
+.stat-val{font-size:16px;font-weight:700;font-family:'JetBrains Mono',monospace}
+.w-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.w-tick{font-size:12px;font-weight:700;width:55px;flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.w-pct{font-size:12px;font-weight:700;width:32px;text-align:right;flex-shrink:0;font-family:'JetBrains Mono',monospace}
+.alloc-strip{display:flex;height:10px;border-radius:5px;overflow:hidden;gap:1px;margin-bottom:8px}
+.alloc-seg{height:100%}
+.alloc-legend{display:flex;flex-wrap:wrap;gap:6px;font-size:10px;color:#64748b}
+.leg-dot{width:8px;height:8px;border-radius:3px;display:inline-block;margin-right:3px}
+/* Metrics */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.bar-row{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.bar-lbl{font-size:10px;color:#64748b;width:95px;text-align:right;flex-shrink:0;font-weight:500}
+.bar-bg{flex:1;height:7px;background:rgba(15,20,40,.5);border-radius:4px;overflow:hidden}
+.bar-fill{height:100%;border-radius:4px}
+.bar-val{font-size:10px;font-weight:700;width:40px;text-align:right;font-family:'JetBrains Mono',monospace}
+.data-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(99,102,241,.04);font-size:12px}
+.data-row:last-child{border-bottom:none}
+.data-key{color:#64748b;font-weight:500}.data-val{font-weight:700;font-family:'JetBrains Mono',monospace}
+/* Corr */
+.corr-cell{display:inline-flex;align-items:center;justify-content:center;height:26px;font-size:10px;font-weight:700;border-radius:4px;font-family:'JetBrains Mono',monospace}
+/* Trade */
+.trade-card{background:rgba(10,14,26,.5);border:1px solid rgba(99,102,241,.08);border-radius:10px;padding:12px;margin-bottom:10px;transition:border-color .2s}
+.trade-card:hover{border-color:rgba(99,102,241,.15)}
+.act-badge{font-size:10px;padding:3px 10px;border-radius:6px;font-weight:700;font-family:'DM Sans',sans-serif;letter-spacing:.3px}
+.act-buy{background:rgba(52,211,153,.1);color:#34d399}
+.act-sell{background:rgba(248,113,113,.08);color:#f87171}
+.act-hold{background:rgba(251,191,36,.08);color:#fbbf24}
+.price-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-top:8px}
+.price-box{background:rgba(15,20,40,.4);border-radius:6px;padding:6px 8px}
+.price-lbl{font-size:9px;color:#4a5568;font-weight:500}
+.price-val{font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace}
+/* Compare */
+.cmp-hdr{display:flex;gap:10px;margin-bottom:10px}
+.cmp-port{flex:1;background:rgba(15,20,40,.5);border:1px solid rgba(99,102,241,.08);border-radius:10px;padding:12px;text-align:center}
+.cmp-row{display:flex;border-bottom:1px solid rgba(99,102,241,.04)}
+.cmp-lbl{width:150px;flex-shrink:0;padding:7px 10px;font-size:11px;color:#64748b;border-right:1px solid rgba(99,102,241,.04);font-weight:500}
+.cmp-cell{flex:1;padding:7px 10px;text-align:center;font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace}
+.cmp-win{background:rgba(52,211,153,.06);color:#34d399}
+.cmp-sec{font-size:9px;font-weight:700;letter-spacing:1px;color:#6366f1;padding:7px 10px;background:rgba(99,102,241,.04);border-bottom:1px solid rgba(99,102,241,.06);display:flex}
+/* Advisor */
+.adv-hdr{padding:10px 12px;font-size:10px;font-weight:700;letter-spacing:1.5px;color:#6366f1;border-bottom:1px solid rgba(99,102,241,.08);flex-shrink:0;display:flex;align-items:center;justify-content:space-between}
+.adv-badge{font-size:9px;padding:2px 8px;background:rgba(99,102,241,.12);color:#a5b4fc;border-radius:8px;font-weight:600}
+.adv-msgs{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.msg-ai .msg-text{background:rgba(15,20,40,.6);border-radius:10px;padding:9px 11px;line-height:1.7;font-size:12px;color:#94a3b8}
+.msg-user .msg-text{background:rgba(99,102,241,.08);border-radius:10px;padding:9px 11px;margin-left:16px;font-size:12px;color:#c4b5fd}
+.msg-who{font-size:9px;color:#4a5568;letter-spacing:1px;margin-bottom:3px;font-weight:700}
+.quick-btns{display:flex;flex-wrap:wrap;gap:4px;padding:6px 10px;border-top:1px solid rgba(99,102,241,.08)}
+.q-btn{font-size:9px;padding:3px 9px;border:1px solid rgba(99,102,241,.12);border-radius:8px;background:none;color:#4a5568;cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:500;transition:all .2s}
+.q-btn:hover{color:#a5b4fc;background:rgba(99,102,241,.06);border-color:rgba(99,102,241,.25)}
+.adv-input-row{display:flex;gap:6px;padding:8px 10px;border-top:1px solid rgba(99,102,241,.08);flex-shrink:0}
+.adv-input{flex:1;padding:7px 10px;border:1px solid rgba(99,102,241,.12);border-radius:8px;background:rgba(15,20,40,.6);color:#c8d2e0;font-size:12px;font-family:'DM Sans',sans-serif;outline:none;transition:all .2s}
+.adv-input:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.1)}
+.adv-send{padding:7px 14px;background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:11px;font-weight:600;font-family:'DM Sans',sans-serif;transition:all .2s}
+.adv-send:hover{box-shadow:0 2px 12px rgba(99,102,241,.3)}
+.info-box{background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.12);border-radius:8px;padding:10px 12px;font-size:11px;color:#93c5fd;line-height:1.6;margin-top:8px}
+.warn-box{background:rgba(251,191,36,.04);border:1px solid rgba(251,191,36,.15);border-radius:8px;padding:8px 10px;font-size:11px;color:#fbbf24;line-height:1.5;margin-top:6px}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.spin{display:inline-block;animation:spin 1s linear infinite}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(99,102,241,.15);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(99,102,241,.3)}
+/* Derivatives */
+.deriv-grid{display:grid;grid-template-columns:280px 1fr;gap:14px}
+.deriv-input{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
+.deriv-lbl{font-size:9px;font-weight:700;color:#6366f1;letter-spacing:.8px}
+.deriv-field{padding:8px 10px;background:rgba(10,14,26,.6);border:1px solid rgba(99,102,241,.12);border-radius:8px;color:#c8d2e0;font-size:12px;font-family:'JetBrains Mono',monospace;width:100%;transition:all .2s}
+.deriv-field:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+.greek-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.greek-box{background:rgba(10,14,26,.5);border:1px solid rgba(99,102,241,.08);border-radius:8px;padding:8px;text-align:center;transition:all .2s}
+.greek-box:hover{border-color:rgba(99,102,241,.2);background:rgba(99,102,241,.04)}
+.greek-sym{font-size:15px;font-weight:700;background:linear-gradient(135deg,#818cf8,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.greek-val{font-size:14px;font-weight:700;margin:3px 0;font-family:'JetBrains Mono',monospace}
+.greek-name{font-size:8px;color:#4a5568;letter-spacing:.8px;font-weight:600;text-transform:uppercase}
+.strat-btn{padding:6px 12px;border:1px solid rgba(99,102,241,.1);border-radius:8px;background:rgba(10,14,26,.4);color:#64748b;font-size:10px;cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600;transition:all .2s}
+.strat-btn:hover{border-color:rgba(99,102,241,.3);color:#a5b4fc}
+.strat-btn.active{background:rgba(99,102,241,.1);color:#a5b4fc;border-color:rgba(99,102,241,.4);box-shadow:0 0 12px rgba(99,102,241,.1)}
+.payoff-stat{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid rgba(99,102,241,.04);font-size:12px}
+.cfa-tag{display:inline-block;padding:2px 7px;background:rgba(99,102,241,.1);color:#a5b4fc;border-radius:5px;font-size:8px;font-weight:700;margin:1px;letter-spacing:.3px}
+/* Paper Trading */
+.pt-layout{display:grid;grid-template-columns:280px 1fr;gap:14px}
+.pt-ticker{padding:10px;background:rgba(10,14,26,.6);border:1px solid rgba(99,102,241,.15);border-radius:10px;color:#e2e8f0;font-size:16px;font-family:'JetBrains Mono',monospace;width:100%;text-transform:uppercase;font-weight:700;letter-spacing:3px;transition:all .2s}
+.pt-ticker:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+.pt-qty{padding:10px;background:rgba(10,14,26,.6);border:1px solid rgba(99,102,241,.12);border-radius:10px;color:#c8d2e0;font-size:14px;font-family:'JetBrains Mono',monospace;width:100%;transition:all .2s}
+.pt-qty:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+.pt-buy{background:linear-gradient(135deg,#059669,#10b981);color:#fff;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;width:100%;transition:all .2s;letter-spacing:1px}
+.pt-buy:hover{box-shadow:0 4px 16px rgba(16,185,129,.3);transform:translateY(-1px)}
+.pt-buy:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+.pt-sell{background:linear-gradient(135deg,#dc2626,#ef4444);color:#fff;border:none;padding:12px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;width:100%;transition:all .2s;letter-spacing:1px}
+.pt-sell:hover{box-shadow:0 4px 16px rgba(239,68,68,.3);transform:translateY(-1px)}
+.pt-sell:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+.pt-nav{font-family:'Outfit',sans-serif;font-size:32px;font-weight:800;line-height:1;margin:6px 0}
+.pt-pnl-row{display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid rgba(99,102,241,.04)}
+.pt-tx{padding:6px 10px;border-bottom:1px solid rgba(99,102,241,.04);font-size:11px;display:flex;justify-content:space-between;align-items:center}
+/* Education Panel */
+.edu-pop{position:absolute;z-index:100;width:340px;background:rgba(15,20,40,.95);border:1px solid rgba(99,102,241,.4);border-radius:14px;padding:16px;box-shadow:0 12px 40px rgba(0,0,0,.6),0 0 20px rgba(99,102,241,.1);left:0;top:100%;backdrop-filter:blur(20px)}
+.edu-formula{background:rgba(99,102,241,.06);border:1px solid rgba(99,102,241,.15);border-radius:8px;padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:13px;color:#a5b4fc;margin:10px 0;letter-spacing:.5px;text-align:center}
+.edu-worked{background:rgba(59,130,246,.06);border:1px solid rgba(59,130,246,.1);border-radius:8px;padding:10px 12px;font-size:12px;color:#93c5fd;line-height:1.7;margin-top:8px}
+.edu-close{position:absolute;top:8px;right:10px;background:none;border:none;color:#64748b;cursor:pointer;font-size:16px;transition:color .2s}
+.edu-close:hover{color:#f1f5f9}
+.q-icon{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:rgba(99,102,241,.12);color:#a5b4fc;font-size:8px;font-weight:700;cursor:pointer;margin-left:4px;flex-shrink:0;border:none;transition:all .2s}
+.q-icon:hover{background:rgba(99,102,241,.25);box-shadow:0 0 8px rgba(99,102,241,.2)}
+/* Challenges */
+.ch-card{background:rgba(15,20,40,.5);border:1px solid rgba(99,102,241,.08);border-radius:12px;padding:14px;margin-bottom:10px;transition:all .2s;cursor:pointer}
+.ch-card:hover{border-color:rgba(99,102,241,.2)}
+.ch-card.complete{border-color:rgba(52,211,153,.25);background:rgba(52,211,153,.03)}
+.ch-card.active{border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.04);box-shadow:0 0 16px rgba(99,102,241,.08)}
+.ch-num{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.ch-check{background:linear-gradient(135deg,#059669,#34d399);color:#fff}
+.ch-pend{background:rgba(99,102,241,.12);color:#a5b4fc}
+.ch-prog{height:5px;background:rgba(15,20,40,.6);border-radius:3px;overflow:hidden;margin-top:10px}
+.ch-prog-fill{height:100%;border-radius:3px;transition:width .4s ease;background:linear-gradient(90deg,#6366f1,#a78bfa)}
+/* Login */
+.login-wrap{display:flex;align-items:center;justify-content:center;height:100vh;background:linear-gradient(135deg,#0a0e1a 0%,#0f1424 50%,#0a0e1a 100%)}
+.login-card{width:380px;padding:36px;background:rgba(15,20,40,.8);border:1px solid rgba(99,102,241,.15);border-radius:20px;backdrop-filter:blur(20px);box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.login-logo{font-family:'Outfit',sans-serif;font-size:28px;font-weight:800;text-align:center;margin-bottom:4px;background:linear-gradient(135deg,#818cf8,#6366f1,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.login-sub{text-align:center;font-size:12px;color:#64748b;margin-bottom:24px;line-height:1.5}
+.login-field{width:100%;padding:12px 14px;background:rgba(10,14,26,.6);border:1px solid rgba(99,102,241,.12);border-radius:10px;color:#e2e8f0;font-size:13px;font-family:'DM Sans',sans-serif;margin-bottom:12px;transition:all .2s}
+.login-field:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+.login-btn{width:100%;padding:13px;background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .2s;margin-top:4px}
+.login-btn:hover{box-shadow:0 6px 24px rgba(99,102,241,.35);transform:translateY(-1px)}
+.login-divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:#4a5568;font-size:11px}
+.login-divider::before,.login-divider::after{content:'';flex:1;height:1px;background:rgba(99,102,241,.1)}
+/* Factor Sliders */
+.factor-panel{background:rgba(99,102,241,.04);border:1px solid rgba(99,102,241,.1);border-radius:10px;padding:12px;margin-bottom:12px}
+.factor-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.factor-name{font-size:11px;font-weight:600;width:85px;flex-shrink:0;color:#c8d2e0}
+.factor-slider{flex:1;accent-color:#6366f1;height:4px}
+.factor-pct{font-size:12px;font-weight:700;width:36px;text-align:right;color:#a5b4fc;font-family:'JetBrains Mono',monospace}
+.factor-desc{font-size:9px;color:#64748b;margin-top:-4px;margin-bottom:6px;padding-left:93px}
+/* Course Hub */
+.course-grid{display:grid;grid-template-columns:260px 1fr;gap:14px}
+.mod-card{background:rgba(15,20,40,.5);border:1px solid rgba(99,102,241,.08);border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;transition:all .2s}
+.mod-card:hover{border-color:rgba(99,102,241,.2)}
+.mod-card.active{border-color:rgba(99,102,241,.4);background:rgba(99,102,241,.04)}
+.mod-prog-bar{height:3px;background:rgba(15,20,40,.6);border-radius:2px;overflow:hidden;margin-top:6px}
+.mod-prog-fill{height:100%;border-radius:2px;background:linear-gradient(90deg,#6366f1,#a78bfa)}
+.quiz-option{display:block;width:100%;text-align:left;padding:10px 14px;background:rgba(10,14,26,.4);border:1px solid rgba(99,102,241,.08);border-radius:8px;color:#c8d2e0;font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif;margin-bottom:6px;transition:all .2s}
+.quiz-option:hover{border-color:rgba(99,102,241,.3);background:rgba(99,102,241,.04)}
+.quiz-option.selected{border-color:#6366f1;background:rgba(99,102,241,.08)}
+.quiz-option.correct{border-color:#34d399;background:rgba(52,211,153,.08);color:#34d399}
+.quiz-option.wrong{border-color:#f87171;background:rgba(248,113,113,.06);color:#f87171}
+.reading-content{font-size:13px;color:#c8d2e0;line-height:1.8;padding:16px;background:rgba(10,14,26,.4);border-radius:10px;border:1px solid rgba(99,102,241,.06)}
+.reading-content h3{font-family:'Outfit',sans-serif;font-size:16px;font-weight:700;color:#a5b4fc;margin:16px 0 8px}
+.reading-content h4{font-size:13px;font-weight:700;color:#6366f1;margin:12px 0 6px}
+.vid-placeholder{background:rgba(10,14,26,.6);border:1px solid rgba(99,102,241,.1);border-radius:10px;padding:40px;text-align:center;color:#4a5568;font-size:12px;margin:10px 0}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const e = React.createElement;
+const {useState, useEffect, useRef, useMemo, useCallback} = React;
+
+// ── Backend Configuration ───────────────────────────────────────────────────
+const BACKEND_URL = window.QUANTEX_BACKEND || "";
+const API_TIMEOUT = 180000; // 3 minutes for screening
+
+async function apiFetch(path, body, timeout = API_TIMEOUT) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const resp = await fetch(BACKEND_URL + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `API error ${resp.status}`);
+    }
+    return await resp.json();
+  } catch (e) {
+    clearTimeout(timer);
+    if (e.name === "AbortError") throw new Error("Request timed out");
+    throw e;
+  }
+}
+
+// Map screener response to the ASSETS format the frontend components expect
+function mapScreened(item) {
+  const ret1y = item.return_1y || 0;
+  const sh = item.sharpe || 0;
+  // yfinance sometimes returns dividendYield as decimal, sometimes as pct
+  // screener multiplies by 100 — cap at 25% to catch double-multiplication
+  let yld = item.dividend_yield || 0;
+  if (yld > 25) yld = yld / 100;
+  return {
+    id: item.ticker, n: item.name || item.ticker, t: item.sector || "Stock",
+    sec: item.sector || "Unknown", ret: ret1y, vol: item.volatility || 20,
+    beta: item.beta || 1, sh: sh, yld: yld,
+    sig: sh >= 1.5 ? "Strong Buy" : sh >= 1 ? "Buy" : sh >= 0.5 ? "Hold" : "Sell",
+    rsi: null, macd: null, tgt: null, stop: null,
+    goals: [], rb: [1, 5], hm: 3,
+    s08: 0, s20: 0, s22: 0,
+    fit: item.fit_score || 50,
+    zMom: item.z_momentum || 0, zQual: item.z_quality || 0,
+    zVal: item.z_value || 0, zVol: item.z_low_vol || 0, zYield: item.z_yield || 0,
+    pe: item.pe_ratio, fpe: item.forward_pe, mktCap: item.market_cap,
+    maxDD: item.max_drawdown || 0,
+  };
+}
+
+const FALLBACK_ASSETS = [
+  {id:"AAPL",n:"Apple Inc.",t:"Stock",sec:"Technology",ret:24.8,vol:28,beta:1.24,sh:1.31,yld:.5,sig:"Buy",rsi:61,macd:"Bullish",tgt:235,stop:188,goals:["Growth","Balanced"],rb:[2,5],hm:3,s08:-54,s20:-32,s22:-27},
+  {id:"MSFT",n:"Microsoft Corp.",t:"Stock",sec:"Technology",ret:18.2,vol:26,beta:.91,sh:1.42,yld:.7,sig:"Strong Buy",rsi:58,macd:"Bullish",tgt:480,stop:390,goals:["Growth","Balanced"],rb:[2,5],hm:3,s08:-44,s20:-28,s22:-29},
+  {id:"NVDA",n:"NVIDIA Corp.",t:"Stock",sec:"Technology",ret:62.4,vol:58,beta:1.89,sh:1.74,yld:0,sig:"Strong Buy",rsi:72,macd:"Bullish",tgt:1000,stop:810,goals:["Growth"],rb:[4,5],hm:5,s08:-72,s20:-42,s22:-66},
+  {id:"META",n:"Meta Platforms",t:"Stock",sec:"Technology",ret:64.2,vol:44,beta:1.28,sh:1.38,yld:.4,sig:"Strong Buy",rsi:68,macd:"Bullish",tgt:620,stop:460,goals:["Growth"],rb:[3,5],hm:3,s08:-55,s20:-35,s22:-64},
+  {id:"AMZN",n:"Amazon.com",t:"Stock",sec:"Technology",ret:42.1,vol:32,beta:1.33,sh:1.18,yld:0,sig:"Buy",rsi:64,macd:"Bullish",tgt:220,stop:165,goals:["Growth","Balanced"],rb:[3,5],hm:3,s08:-45,s20:-18,s22:-50},
+  {id:"GOOGL",n:"Alphabet Inc.",t:"Stock",sec:"Technology",ret:35.8,vol:28,beta:1.12,sh:1.22,yld:0,sig:"Buy",rsi:59,macd:"Neutral",tgt:200,stop:155,goals:["Growth","Balanced"],rb:[3,5],hm:3,s08:-55,s20:-30,s22:-40},
+  {id:"JPM",n:"JPMorgan Chase",t:"Stock",sec:"Financials",ret:31.2,vol:29,beta:1.08,sh:.98,yld:2.4,sig:"Buy",rsi:55,macd:"Neutral",tgt:220,stop:182,goals:["Balanced","Income"],rb:[2,5],hm:3,s08:-68,s20:-38,s22:-18},
+  {id:"JNJ",n:"Johnson & Johnson",t:"Stock",sec:"Healthcare",ret:3.1,vol:16,beta:.62,sh:.61,yld:3.4,sig:"Hold",rsi:44,macd:"Bearish",tgt:165,stop:148,goals:["Income","Preservation"],rb:[1,3],hm:1,s08:-22,s20:-14,s22:-6},
+  {id:"XOM",n:"Exxon Mobil",t:"Stock",sec:"Energy",ret:12.4,vol:25,beta:1.22,sh:.72,yld:3.8,sig:"Hold",rsi:51,macd:"Neutral",tgt:125,stop:108,goals:["Income","Balanced"],rb:[2,4],hm:3,s08:-51,s20:-44,s22:52},
+  {id:"COST",n:"Costco Wholesale",t:"Stock",sec:"Consumer",ret:29.8,vol:18,beta:.82,sh:1.42,yld:.6,sig:"Buy",rsi:63,macd:"Bullish",tgt:920,stop:795,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-28,s20:-12,s22:-8},
+  {id:"LLY",n:"Eli Lilly & Co.",t:"Stock",sec:"Healthcare",ret:54.8,vol:32,beta:.48,sh:1.62,yld:.7,sig:"Strong Buy",rsi:66,macd:"Bullish",tgt:920,stop:740,goals:["Growth","Balanced"],rb:[3,5],hm:5,s08:-20,s20:-12,s22:-8},
+  {id:"AVGO",n:"Broadcom Inc.",t:"Stock",sec:"Technology",ret:84.2,vol:42,beta:1.44,sh:1.88,yld:1.2,sig:"Strong Buy",rsi:70,macd:"Bullish",tgt:1800,stop:1380,goals:["Growth"],rb:[4,5],hm:5,s08:-55,s20:-38,s22:-42},
+  {id:"PG",n:"Procter & Gamble",t:"Stock",sec:"Consumer",ret:11.2,vol:14,beta:.52,sh:.82,yld:2.4,sig:"Hold",rsi:48,macd:"Neutral",tgt:175,stop:158,goals:["Income","Preservation","Balanced"],rb:[1,3],hm:1,s08:-18,s20:-10,s22:-8},
+  {id:"BRK_B",n:"Berkshire Hathaway B",t:"Stock",sec:"Financials",ret:22.1,vol:21,beta:.84,sh:1.02,yld:0,sig:"Buy",rsi:54,macd:"Neutral",tgt:460,stop:395,goals:["Balanced","Growth"],rb:[2,4],hm:3,s08:-36,s20:-22,s22:-4},
+  {id:"MA",n:"Mastercard Inc.",t:"Stock",sec:"Financials",ret:19.8,vol:22,beta:1.08,sh:1.12,yld:.6,sig:"Buy",rsi:57,macd:"Bullish",tgt:490,stop:415,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-58,s20:-32,s22:-20},
+  {id:"SPY",n:"SPDR S&P 500 ETF",t:"ETF",sec:"Diversified",ret:24.2,vol:17,beta:1.0,sh:1.21,yld:1.3,sig:"Buy",rsi:60,macd:"Bullish",tgt:560,stop:498,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-50,s20:-34,s22:-19},
+  {id:"QQQ",n:"Invesco QQQ ETF",t:"ETF",sec:"Technology",ret:31.4,vol:22,beta:1.18,sh:1.28,yld:.5,sig:"Buy",rsi:63,macd:"Bullish",tgt:480,stop:415,goals:["Growth"],rb:[3,5],hm:3,s08:-52,s20:-28,s22:-33},
+  {id:"GLD",n:"SPDR Gold Shares",t:"ETF",sec:"Commodities",ret:14.8,vol:15,beta:-.12,sh:.62,yld:0,sig:"Buy",rsi:62,macd:"Bullish",tgt:320,stop:285,goals:["Preservation","Balanced"],rb:[1,4],hm:1,s08:5,s20:24,s22:-2},
+  {id:"EFA",n:"iShares MSCI EAFE",t:"ETF",sec:"International",ret:18.2,vol:18,beta:.84,sh:.88,yld:2.8,sig:"Buy",rsi:55,macd:"Neutral",tgt:85,stop:72,goals:["Balanced","Growth"],rb:[2,4],hm:3,s08:-44,s20:-28,s22:-22},
+  {id:"HYG",n:"iShares HY Corp Bond ETF",t:"ETF",sec:"Fixed Income",ret:10.8,vol:9,beta:.48,sh:.82,yld:6.8,sig:"Hold",rsi:52,macd:"Neutral",tgt:80,stop:74,goals:["Income"],rb:[2,4],hm:1,s08:-32,s20:-20,s22:-14},
+  {id:"VNQ",n:"Vanguard Real Estate ETF",t:"ETF",sec:"Real Estate",ret:8.2,vol:22,beta:.88,sh:.48,yld:4.2,sig:"Hold",rsi:46,macd:"Bearish",tgt:90,stop:78,goals:["Income"],rb:[2,4],hm:3,s08:-68,s20:-38,s22:-28},
+  {id:"US10Y",n:"US 10-Year Treasury",t:"Bond",sec:"Fixed Income",ret:4.2,vol:8,beta:-.18,sh:.42,yld:4.4,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Income"],rb:[1,2],hm:1,s08:18,s20:18,s22:-18},
+  {id:"US2Y",n:"US 2-Year Treasury",t:"Bond",sec:"Fixed Income",ret:5.2,vol:2,beta:-.04,sh:1.22,yld:5.2,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation"],rb:[1,2],hm:1,s08:8,s20:4,s22:-4},
+  {id:"CORP_HY",n:"HY Corporate Bonds",t:"Bond",sec:"Fixed Income",ret:10.2,vol:11,beta:.42,sh:.74,yld:8.2,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Income"],rb:[2,4],hm:1,s08:-28,s20:-18,s22:-14},
+  {id:"MUNI",n:"Municipal Bond Index",t:"Bond",sec:"Fixed Income",ret:3.8,vol:5,beta:-.02,sh:.72,yld:3.6,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Income"],rb:[1,3],hm:1,s08:-8,s20:-4,s22:-12},
+  {id:"TIPS",n:"TIPS Bond Index",t:"Bond",sec:"Fixed Income",ret:2.8,vol:6,beta:-.08,sh:.34,yld:2.8,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation"],rb:[1,2],hm:1,s08:-4,s20:8,s22:-14},
+  {id:"VTSAX",n:"Vanguard Total Market",t:"Mutual Fund",sec:"Diversified",ret:23.8,vol:17,beta:1.0,sh:1.18,yld:1.4,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-51,s20:-34,s22:-20},
+  {id:"VBTLX",n:"Vanguard Total Bond",t:"Mutual Fund",sec:"Fixed Income",ret:4.2,vol:5,beta:.04,sh:.41,yld:4.2,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Income"],rb:[1,2],hm:1,s08:5,s20:7,s22:-13},
+  {id:"VWELX",n:"Vanguard Wellington",t:"Mutual Fund",sec:"Balanced",ret:13.2,vol:12,beta:.65,sh:.71,yld:2.3,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Balanced","Income"],rb:[2,3],hm:3,s08:-28,s20:-18,s22:-16},
+  {id:"PIMIX",n:"PIMCO Income Inst.",t:"Mutual Fund",sec:"Fixed Income",ret:9.2,vol:7,beta:.22,sh:.79,yld:7.1,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Income"],rb:[2,3],hm:1,s08:-8,s20:-4,s22:-10},
+  {id:"FCNTX",n:"Fidelity Contrafund",t:"Mutual Fund",sec:"Growth",ret:28.1,vol:22,beta:1.07,sh:.84,yld:.4,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Growth"],rb:[3,5],hm:5,s08:-49,s20:-33,s22:-27},
+  {id:"DODGX",n:"Dodge & Cox Stock",t:"Mutual Fund",sec:"Value",ret:19.8,vol:22,beta:.98,sh:.76,yld:1.8,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Balanced","Growth"],rb:[2,4],hm:5,s08:-45,s20:-37,s22:-3},
+  {id:"VDIGX",n:"Vanguard Dividend Growth",t:"Mutual Fund",sec:"Dividend",ret:17.4,vol:14,beta:.81,sh:.82,yld:1.9,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Income","Balanced"],rb:[2,3],hm:3,s08:-35,s20:-23,s22:-8},
+  {id:"SPY_CC",n:"Covered Call Strategy",t:"Option",sec:"Derivatives",ret:14.2,vol:10,beta:.62,sh:1.08,yld:8.2,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Income","Balanced"],rb:[3,5],hm:1,s08:-28,s20:-18,s22:-12},
+  {id:"PUTSPRD",n:"Put Spread Hedge",t:"Option",sec:"Derivatives",ret:4.2,vol:8,beta:-.42,sh:.44,yld:0,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation"],rb:[3,5],hm:1,s08:32,s20:28,s22:14},
+  {id:"GC_F",n:"Gold Futures",t:"Futures",sec:"Commodities",ret:14.8,vol:16,beta:-.12,sh:.62,yld:0,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Balanced"],rb:[3,5],hm:1,s08:5,s20:22,s22:-1},
+  {id:"O",n:"Realty Income (REIT)",t:"REIT",sec:"Real Estate",ret:9.2,vol:18,beta:.72,sh:.52,yld:5.8,sig:"Hold",rsi:47,macd:"Bearish",tgt:60,stop:53,goals:["Income"],rb:[2,4],hm:3,s08:-42,s20:-22,s22:-26},
+  {id:"PLD",n:"Prologis (REIT)",t:"REIT",sec:"Real Estate",ret:14.2,vol:24,beta:.92,sh:.68,yld:2.8,sig:"Buy",rsi:54,macd:"Neutral",tgt:125,stop:108,goals:["Balanced","Income"],rb:[2,4],hm:3,s08:-62,s20:-28,s22:-32},
+];
+
+// ASSETS starts as fallback, gets replaced when backend screening completes
+let ASSETS = FALLBACK_ASSETS;
+
+const COLORS=["#534AB7","#1D9E75","#BA7517","#185FA5","#993C1D","#3B6D11","#0F6E56","#854F0B","#A32D2D","#0C447C","#3C3489","#085041","#633806","#4B1528"];
+const TC={Stock:"#534AB7",ETF:"#1D9E75",Bond:"#185FA5","Mutual Fund":"#BA7517",Option:"#993C1D",Futures:"#4B1528",REIT:"#A32D2D"};
+const MKT={SPY:{p:"527.84",ch:.82},QQQ:{p:"449.21",ch:1.14},VIX:{p:"18.42",ch:-1.2},"10Y":{p:"4.38%",ch:.04},GLD:{p:"302.17",ch:.44}};
+
+function scoreProfile(a){
+  let s=50;
+  s+=({"18-25":20,"26-35":14,"36-45":8,"46-55":2,"56-65":-6,"65+":-14}[a.age]||0);
+  s+=({"<$50K":-6,"$50K-$100K":2,"$100K-$250K":7,"$250K-$500K":11,"$500K+":15}[a.inc]||0);
+  s+=({"<$100K":-6,"$100K-$500K":2,"$500K-$1M":7,"$1M-$5M":11,"$5M+":15}[a.nw]||0);
+  s+=({"<1 year":-18,"1-3 years":-10,"3-7 years":2,"7-15 years":10,"15+ years":18}[a.hor]||0);
+  s+=({"Sell everything":-20,"Sell some":-8,"Hold steady":6,"Buy more":16}[a.los]||0);
+  s+=({"None":-10,"Beginner":-4,"Intermediate":5,"Experienced":10,"Professional":15}[a.exp]||0);
+  s+=({"High (within 1yr)":-14,"Medium (3-5 yrs)":0,"Low (5+ yrs)":10}[a.liq]||0);
+  const ds=({"None":0,"Basic":3,"Traded options":9,"Advanced":15}[a.der]||0);
+  s+=ds;
+  s=Math.max(5,Math.min(100,s));
+  const cat=s>=85?"Aggressive":s>=68?"Mod-Aggressive":s>=48?"Moderate":s>=30?"Mod-Conservative":"Conservative";
+  const rb=s>=85?5:s>=68?4:s>=48?3:s>=30?2:1;
+  const eq=Math.min(95,Math.max(10,Math.round(s*.88+8)));
+  const bd=Math.max(0,Math.round((100-eq)*.70));
+  const hy=({"<1 year":.5,"1-3 years":2,"3-7 years":5,"7-15 years":10,"15+ years":20}[a.hor]||5);
+  const flags=[];
+  if(a.liq==="High (within 1yr)"&&s>50)flags.push("High liquidity need conflicts with aggressive allocation");
+  if(a.los==="Sell everything"&&s>30)flags.push("Low loss tolerance — consider more conservative profile");
+  return{score:s,cat,rb,eq,bd,alt:100-eq-bd,hy,optElig:s>=50&&ds>=3,futElig:s>=70&&ds>=9,warElig:s>=60,maxPos:s>=70?30:s>=50?20:15,maxBeta:+(0.4+s*0.014).toFixed(2),maxDD:Math.round(s*0.46),goal:a.goal,hor:a.hor,flags};
+}
+
+function fitScore(asset,profile){
+  if(!profile)return 50;
+  let s=0;
+  if(asset.goals.includes(profile.goal))s+=40;
+  else if(asset.goals.some(g=>["Balanced","Growth"].includes(g))&&["Growth","Balanced"].includes(profile.goal))s+=20;
+  const[lo,hi]=asset.rb;
+  if(profile.rb>=lo&&profile.rb<=hi)s+=30;
+  else if(Math.abs(profile.rb-lo)<=1||Math.abs(profile.rb-hi)<=1)s+=15;
+  if(profile.hy>=asset.hm)s+=15;else if(profile.hy>=asset.hm*.6)s+=7;
+  if(asset.sh>=1.2)s+=10;else if(asset.sh>=.7)s+=6;else if(asset.sh>=.4)s+=3;
+  if(asset.t==="Option"&&!profile.optElig)s=Math.min(s,20);
+  if(asset.t==="Futures"&&!profile.futElig)s=Math.min(s,20);
+  return Math.min(100,Math.round(s));
+}
+
+const _cc={};
+function getCorr(a,b){
+  const k=[a,b].sort().join("|");
+  if(!_cc[k]){
+    const ta=ASSETS.find(u=>u.id===a)?.t,tb=ASSETS.find(u=>u.id===b)?.t;
+    const ba=ASSETS.find(u=>u.id===a)?.beta||1,bb=ASSETS.find(u=>u.id===b)?.beta||1;
+    let v;
+    if((ta==="Bond"&&(tb==="Stock"||tb==="ETF"))||((ta==="Stock"||ta==="ETF")&&tb==="Bond"))v=-.12+Math.random()*.08;
+    else if(ta==="Bond"&&tb==="Bond")v=.70+Math.random()*.08;
+    else if(ta===tb)v=.70+Math.random()*.12;
+    else v=Math.max(-.4,Math.min(.95,ba*bb*.42+Math.random()*.08-.04));
+    _cc[k]=+v.toFixed(2);
+  }
+  return _cc[k];
+}
+
+function calcStats(weights){
+  const ks=Object.keys(weights);if(!ks.length)return null;
+  const rf=.043;let ret=0,beta=0,vol=0;
+  const ws=ks.map(k=>weights[k]/100);
+  ks.forEach((k,i)=>{const a=ASSETS.find(u=>u.id===k)||{};ret+=ws[i]*(a.ret||0)/100;beta+=ws[i]*(a.beta||1);});
+  for(let i=0;i<ks.length;i++)for(let j=0;j<ks.length;j++){const vi=(ASSETS.find(u=>u.id===ks[i])?.vol||20)/100,vj=(ASSETS.find(u=>u.id===ks[j])?.vol||20)/100;vol+=ws[i]*ws[j]*vi*vj*getCorr(ks[i],ks[j]);}
+  vol=Math.sqrt(Math.max(vol,0));
+  const sh=vol>0?(ret-rf)/vol:0,so=vol>0?(ret-rf)/(vol*.72):0,tr=beta>0?(ret-rf)/beta:0;
+  const divY=ks.reduce((a,k,i)=>a+(ASSETS.find(u=>u.id===k)?.yld||0)*ws[i],0);
+  const calmar=ret/Math.max(Math.abs(vol*2.1),.001),infoR=(ret-.242)/Math.max(vol,.001);
+  const s08=ks.reduce((a,k,i)=>a+(ASSETS.find(u=>u.id===k)?.s08||0)*ws[i],0);
+  const s20=ks.reduce((a,k,i)=>a+(ASSETS.find(u=>u.id===k)?.s20||0)*ws[i],0);
+  const s22=ks.reduce((a,k,i)=>a+(ASSETS.find(u=>u.id===k)?.s22||0)*ws[i],0);
+  const rc=ks.map((k,i)=>({k,pct:+(ws[i]*(ASSETS.find(u=>u.id===k)?.vol||20)/100/Math.max(vol,.001)*100).toFixed(1)}));
+  return{ret:+(ret*100).toFixed(2),vol:+(vol*100).toFixed(2),sh:+sh.toFixed(3),beta:+beta.toFixed(3),so:+so.toFixed(3),tr:+(tr*100).toFixed(3),var95:+(-(ret/252-1.645*vol/Math.sqrt(252))*100).toFixed(2),var99:+(-(ret/252-2.326*vol/Math.sqrt(252))*100).toFixed(2),cvar95:+(-(ret/252-2.063*vol/Math.sqrt(252))*100).toFixed(2),maxDD:+(-(vol*2.1)*100).toFixed(2),divY:+(divY*100).toFixed(2),variance:+(vol*vol*10000).toFixed(1),calmar:+calmar.toFixed(3),infoR:+infoR.toFixed(3),s08:+s08.toFixed(1),s20:+s20.toFixed(1),s22:+s22.toFixed(1),rc};
+}
+
+// Local fallback optimizer (250-trial Monte Carlo — used when backend is unavailable)
+function optimizeLocal(tickers,goal,maxPos){
+  if(!tickers.length)return{};
+  if(tickers.length===1)return{[tickers[0]]:100};
+  let best=null,bestScore=-Infinity;
+  for(let t=0;t<250;t++){
+    let ws=tickers.map(()=>Math.random());
+    const sum=ws.reduce((a,b)=>a+b,0);ws=ws.map(w=>Math.min(w/sum,(maxPos||30)/100));
+    const s2=ws.reduce((a,b)=>a+b,0);ws=ws.map(w=>w/s2);
+    const wo={};tickers.forEach((k,i)=>wo[k]=ws[i]*100);
+    const s=calcStats(wo);if(!s)continue;
+    const sc=goal==="sharpe"?s.sh:goal==="return"?s.ret:goal==="minvol"?-s.vol:-s.vol/Math.max(s.ret,.001);
+    if(sc>bestScore){bestScore=sc;best=[...ws];}
+  }
+  if(!best)best=tickers.map(()=>1/tickers.length);
+  const wo={};tickers.forEach((k,i)=>wo[k]=Math.round(best[i]*100));
+  const tot=Object.values(wo).reduce((a,b)=>a+b,0);wo[tickers[0]]+=100-tot;
+  return wo;
+}
+
+// Backend optimizer (scipy SLSQP via /api/optimize)
+async function optimizeBackend(tickers, goal, maxPos, riskScore, currentWeights) {
+  const objMap = { sharpe: "max_sharpe", "return": "max_return", minvol: "min_vol", riskparity: "risk_parity" };
+  const data = await apiFetch("/api/optimize", {
+    tickers,
+    objective: objMap[goal] || "max_sharpe",
+    risk_score: riskScore || null,
+    include_current_weights: currentWeights || null,
+  });
+  // Convert weights from 0-1 to 0-100 integer percentages
+  const wo = {};
+  for (const [k, v] of Object.entries(data.weights || {})) {
+    wo[k] = Math.round(v * 100);
+  }
+  // Ensure total = 100
+  const tot = Object.values(wo).reduce((a, b) => a + b, 0);
+  if (tot > 0 && tot !== 100) {
+    const first = Object.keys(wo)[0];
+    wo[first] += 100 - tot;
+  }
+  return { weights: wo, meta: data };
+}
+
+// ── Onboard ──────────────────────────────────────────────────────────────────
+function Onboard({onDone}){
+  const[step,setStep]=useState(0);
+  const[a,setA]=useState({goal:"",age:"36-45",inc:"$100K-$250K",nw:"$100K-$500K",hor:"7-15 years",los:"Hold steady",exp:"Intermediate",liq:"Medium (3-5 yrs)",der:"None"});
+  const set=(k,v)=>setA(x=>({...x,[k]:v}));
+  const rc=s=>s>=80?"#ef4444":s>=60?"#f59e0b":s>=40?"#818cf8":"#1D9E75";
+
+  const GOALS=[
+    {id:"Growth",icon:"📈",name:"Capital Growth",desc:"Maximize long-term wealth. Accept volatility for higher returns."},
+    {id:"Income",icon:"💰",name:"Income Generation",desc:"Steady dividends and interest. Preserve capital while earning."},
+    {id:"Preservation",icon:"🛡️",name:"Capital Preservation",desc:"Protect what you have. Minimize risk above all else."},
+    {id:"Balanced",icon:"⚖️",name:"Balanced Growth",desc:"Grow steadily while managing downside risk."},
+  ];
+
+  const STEPS=["Goal","Profile","Result"];
+  const progBar=e("div",{className:"prog"},
+    STEPS.map((s,i)=>[
+      e("div",{key:"s"+i,className:"prog-step"+(step===i?" active":step>i?" done":"")},
+        e("div",{className:"prog-dot"},step>i?"✓":i+1),
+        e("span",{style:{marginLeft:5}},s)
+      ),
+      i<2&&e("div",{key:"l"+i,className:"prog-line"+(step>i?" done":"")})
+    ]).flat()
+  );
+
+  if(step===0)return e("div",{className:"ow"},
+    progBar,
+    e("div",{className:"step-card"},
+      e("div",{className:"step-title"},"What is your primary investment goal?"),
+      e("div",{className:"step-sub"},"This shapes everything — which assets we recommend, how we optimize, and what risk guardrails apply."),
+      e("div",{className:"goal-grid"},
+        GOALS.map(g=>e("div",{key:g.id,className:"goal-card"+(a.goal===g.id?" selected":""),onClick:()=>set("goal",g.id)},
+          e("div",{className:"goal-icon"},g.icon),
+          e("div",{className:"goal-name"},g.name),
+          e("div",{className:"goal-desc"},g.desc)
+        ))
+      ),
+      e("div",{className:"step-nav"},
+        e("div"),
+        e("button",{className:"btn btn-p",disabled:!a.goal,onClick:()=>setStep(1)},"Next →")
+      )
+    )
+  );
+
+  if(step===1)return e("div",{className:"ow"},
+    progBar,
+    e("div",{className:"step-card"},
+      e("div",{className:"step-title"},"Tell us about yourself"),
+      e("div",{className:"step-sub"},"These factors determine eligible asset classes, position limits, and whether options or futures are appropriate for you."),
+      e("div",{className:"q-grid"},
+        [["AGE","age",["18-25","26-35","36-45","46-55","56-65","65+"]],
+         ["INCOME","inc",["<$50K","$50K-$100K","$100K-$250K","$250K-$500K","$500K+"]],
+         ["NET WORTH","nw",["<$100K","$100K-$500K","$500K-$1M","$1M-$5M","$5M+"]],
+         ["TIME HORIZON","hor",["<1 year","1-3 years","3-7 years","7-15 years","15+ years"]],
+         ["IF PORTFOLIO FELL 25%","los",["Sell everything","Sell some","Hold steady","Buy more"]],
+         ["EXPERIENCE","exp",["None","Beginner","Intermediate","Experienced","Professional"]],
+         ["LIQUIDITY NEEDS","liq",["High (within 1yr)","Medium (3-5 yrs)","Low (5+ yrs)"]],
+         ["OPTIONS/DERIV EXP.","der",["None","Basic","Traded options","Advanced"]]
+        ].map(([label,key,opts])=>e("div",{key,className:"q-item"},
+          e("div",{className:"q-label"},label),
+          e("select",{className:"q-sel",value:a[key],onChange:ev=>set(key,ev.target.value)},
+            opts.map(o=>e("option",{key:o},o))
+          )
+        ))
+      ),
+      e("div",{className:"step-nav"},
+        e("button",{className:"btn btn-g",onClick:()=>setStep(0)},"← Back"),
+        e("button",{className:"btn btn-p",onClick:()=>setStep(2)},"Next →")
+      )
+    )
+  );
+
+  // Step 2 - compute and show result
+  const p=scoreProfile(a);
+  return e("div",{className:"ow"},
+    progBar,
+    e("div",{className:"step-card"},
+      e("div",{className:"step-title"},"Your Investor Profile"),
+      e("div",{className:"step-sub"},"Review and confirm. Go back if anything looks off."),
+      e("div",{className:"profile-result"},
+        e("div",{className:"score-big",style:{color:rc(p.score)}},p.score,e("span",{style:{fontSize:16,color:"#475569"}},"/100")),
+        e("div",{className:"score-cat"},p.cat),
+        e("div",{style:{height:5,background:"#0d1228",borderRadius:3,overflow:"hidden",marginBottom:12}},
+          e("div",{style:{width:p.score+"%",height:"100%",background:rc(p.score),borderRadius:3}})
+        ),
+        [["Equities",p.eq,"#534AB7"],["Bonds",p.bd,"#185FA5"],["Alternatives",p.alt,"#BA7517"]].map(([l,v,c])=>
+          e("div",{key:l,className:"alloc-row"},
+            e("div",{className:"alloc-lbl"},l),
+            e("div",{className:"alloc-bar"},e("div",{className:"alloc-fill",style:{width:v+"%",background:c}})),
+            e("div",{className:"alloc-pct",style:{color:c}},v+"%")
+          )
+        ),
+        e("div",{className:"elig-grid"},
+          [["Max Position",p.maxPos+"%"],["Max Beta",p.maxBeta],["Max DD Tol.",p.maxDD+"%"],
+           ["Options",p.optElig?"✓ Yes":"✗ No"],["Futures",p.futElig?"✓ Yes":"✗ No"],["Warrants",p.warElig?"✓ Yes":"✗ No"]
+          ].map(([l,v])=>e("div",{key:l,className:"elig-box"},
+            e("div",{className:"elig-lbl"},l),
+            e("div",{className:"elig-val "+(String(v).includes("✓")?"elig-yes":String(v).includes("✗")?"elig-no":"")},v)
+          ))
+        ),
+        p.flags.map((f,i)=>e("div",{key:i,className:"flag-box"},"⚠ "+f))
+      ),
+      e("div",{className:"step-nav"},
+        e("button",{className:"btn btn-g",onClick:()=>setStep(1)},"← Back"),
+        e("button",{className:"btn btn-p",onClick:()=>onDone(p)},"Start Discovering →")
+      )
+    )
+  );
+}
+
+// ── Discovery ─────────────────────────────────────────────────────────────────
+function Discovery({profile,ports,onAdd}){
+  const[tf,setTf]=useState("All");
+  const[search,setSearch]=useState("");
+  const[sk,setSk]=useState("fit");
+  const[sd,setSd]=useState(-1);
+  const defaultWeights={Growth:{momentum:.35,quality:.25,value:.15,low_vol:.10,yield:.15},Income:{momentum:.10,quality:.20,value:.15,low_vol:.20,yield:.35},Preservation:{momentum:.10,quality:.25,value:.15,low_vol:.35,yield:.15},Balanced:{momentum:.20,quality:.25,value:.20,low_vol:.20,yield:.15}};
+  const[factorW,setFactorW]=useState(defaultWeights[profile?.goal]||defaultWeights.Balanced);
+  const[showFactors,setShowFactors]=useState(false);
+  const TYPES=useMemo(()=>{
+    const types=new Set(ASSETS.map(a=>a.t));
+    return["All",...Array.from(types).sort()];
+  },[ASSETS.length]);
+  const SIG={"Strong Buy":"#1D9E75","Buy":"#3B6D11","Hold":"#f59e0b","Sell":"#ef4444"};
+  // Re-rank assets when factor weights change
+  const rows=ASSETS.map(a=>{
+    let fit=a.fit||fitScore(a,profile);
+    // Apply custom factor weights if available
+    if(a.zMom!==undefined){
+      const customScore=factorW.momentum*(a.zMom||0)+factorW.quality*(a.zQual||0)+factorW.value*(a.zVal||0)+factorW.low_vol*(a.zVol||0)+factorW.yield*(a.zYield||0);
+      fit=Math.max(0,Math.min(100,Math.round((customScore+2)*10+40)));
+    }
+    return{...a,fit};
+  }).filter(a=>(tf==="All"||a.t===tf||a.sec===tf)&&(!search||a.id.toLowerCase().includes(search.toLowerCase())||a.n.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>sd*(b[sk]||0)-sd*(a[sk]||0));
+  const hs=k=>{if(sk===k)setSd(d=>-d);else{setSk(k);setSd(-1);}};
+  const TH=(f,l)=>e("th",{onClick:()=>hs(f)},l+(sk===f?(sd===-1?"↓":"↑"):"↕"));
+  const pks=Object.keys(ports);
+  return e("div",null,
+    e("div",{className:"card"},
+      e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:9}},
+        e("div",null,
+          e("div",{className:"card-title"},"GUIDED FUND DISCOVERY"),
+          e("div",{style:{fontSize:11,color:"#64748b",lineHeight:1.5}},"Ranked by ",e("span",{style:{color:"#a5b4fc",fontWeight:"bold"}},"Fit Score"),profile?" — "+profile.cat+" · "+profile.goal+" · "+profile.hor:" — complete ① PROFILE first")
+        ),
+        e("div",{style:{display:"flex",gap:6,alignItems:"center",flexShrink:0}},
+          e("button",{className:"btn btn-xs"+(showFactors?" btn-p":""),onClick:()=>setShowFactors(!showFactors),style:{fontSize:9}},showFactors?"Hide Factors ▲":"⚙ Factor Weights ▼"),
+          [["70+ Strong","rgba(52,211,153,.1)","#34d399"],["45-69 OK","rgba(251,191,36,.08)","#fbbf24"],["<45 Poor","rgba(248,113,113,.08)","#f87171"]].map(([l,bg,col])=>e("span",{key:l,style:{fontSize:9,padding:"2px 7px",background:bg,color:col,borderRadius:7}},l))
+        )
+      ),
+      showFactors&&e(FactorSliders,{weights:factorW,onChange:setFactorW,goal:profile?.goal||"Balanced"}),
+      e("div",{className:"type-tabs"},TYPES.map(tp=>e("button",{key:tp,className:"type-tab"+(tf===tp?" active":""),onClick:()=>setTf(tp)},tp))),
+      e("input",{className:"search-input",placeholder:"Search ticker or name...",value:search,onChange:ev=>setSearch(ev.target.value)})
+    ),
+    e("div",{className:"tbl-wrap"},
+      e("table",{className:"dtbl"},
+        e("thead",null,e("tr",null,
+          TH("fit","FIT"),TH("id","TICKER"),e("th",null,"NAME"),e("th",null,"TYPE"),
+          TH("ret","1Y RET"),TH("vol","VOL"),TH("beta","BETA"),TH("sh","SHARPE"),TH("yld","YIELD"),
+          e("th",null,"RSI"),e("th",null,"SIGNAL"),e("th",null,"ADD TO")
+        )),
+        e("tbody",null,rows.map(a=>{
+          const fitCls=a.fit>=70?"fit-high":a.fit>=45?"fit-mid":"fit-low";
+          return e("tr",{key:a.id},
+            e("td",null,e("div",{className:"fit-badge "+fitCls},a.fit)),
+            e("td",{style:{fontWeight:"bold",color:TC[a.t]||"#818cf8"}},a.id),
+            e("td",{style:{maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",color:"#94a3b8"}},a.n),
+            e("td",null,e("span",{className:"type-badge",style:{background:(TC[a.t]||"#818cf8")+"22",color:TC[a.t]||"#818cf8"}},a.t)),
+            e("td",{className:a.ret>=0?"up":"dn"},(a.ret>0?"+":"")+a.ret.toFixed(1)+"%"),
+            e("td",null,a.vol.toFixed(1)+"%"),
+            e("td",null,a.beta.toFixed(2)),
+            e("td",{style:{color:a.sh>=1?"#1D9E75":a.sh>=.5?"#f59e0b":"#ef4444",fontWeight:"bold"}},a.sh.toFixed(2)),
+            e("td",null,a.yld.toFixed(1)+"%"),
+            e("td",{style:{color:a.rsi>70?"#ef4444":a.rsi<30?"#1D9E75":"#94a3b8"}},a.rsi||"—"),
+            e("td",{style:{color:SIG[a.sig]||"#f59e0b",fontSize:10,fontWeight:"bold"}},a.sig),
+            e("td",null,e("div",{style:{display:"flex",gap:3}},
+              pks.map(pn=>{const inP=ports[pn][a.id]!==undefined;return e("button",{key:pn,className:"btn btn-xs "+(inP?"btn-s":"btn-p"),onClick:()=>onAdd(pn,a.id)},(inP?"✓":"+")+(" "+pn));})
+            ))
+          );
+        }))
+      )
+    )
+  );
+}
+
+// ── Portfolio Builder ─────────────────────────────────────────────────────────
+function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
+  const[goal,setGoal]=useState("sharpe");
+  const tickers=Object.keys(weights);
+  const stats=tickers.length>0?calcStats(weights):null;
+  const total=Object.values(weights).reduce((a,b)=>a+b,0);
+  if(!tickers.length)return e("div",{className:"card",style:{textAlign:"center",padding:36}},e("div",{style:{fontSize:22,marginBottom:9}},"📊"),e("div",{style:{color:"#475569"}},"No assets yet — go to Discovery and click + to add them here."));
+  return e("div",{className:"builder-layout"},
+    e("div",{className:"builder-left"},
+      e("div",{className:"card"},
+        e("div",{className:"card-title"},"HOLDINGS"),
+        tickers.map((k,i)=>e("div",{key:k,className:"w-row"},
+          e("span",{className:"w-tick",style:{color:COLORS[i%COLORS.length]}},k),
+          e("input",{type:"range",min:0,max:60,value:weights[k],onChange:ev=>onUpdate(k,+ev.target.value),style:{flex:1,accentColor:COLORS[i%COLORS.length]}}),
+          e("span",{className:"w-pct"},weights[k]+"%"),
+          e("button",{className:"btn btn-d btn-xs",onClick:()=>onRemove(k)},"✕")
+        )),
+        e("div",{style:{fontSize:11,color:"#475569",marginTop:7,paddingTop:7,borderTop:"1px solid #1a2540"}},"Total: ",e("span",{style:{fontWeight:"bold",color:Math.abs(total-100)<2?"#1D9E75":"#ef4444"}},total+"%"))
+      ),
+      e("div",{className:"card"},
+        e("div",{className:"card-title"},"OPTIMIZE"),
+        [["sharpe","Maximize Sharpe"],["return","Maximize Return"],["minvol","Minimize Volatility"],["riskparity","Risk Parity"]].map(([v,l])=>
+          e("label",{key:v,style:{display:"flex",alignItems:"center",gap:5,fontSize:11,cursor:"pointer",marginBottom:6}},
+            e("input",{type:"radio",name:"og-"+name,value:v,checked:goal===v,onChange:()=>setGoal(v),style:{accentColor:"#6366f1"}}),l
+          )
+        ),
+        e("button",{className:"btn btn-p btn-full",style:{marginTop:8},onClick:()=>onOpt(goal,profile?.maxPos||30),disabled:tickers.length<2||optLoading},optLoading?e("span",null,e("span",{className:"spin"},"◌")," Optimizing…"):"▸ OPTIMIZE"),
+        profile&&e("div",{className:"info-box",style:{fontSize:10,marginTop:7}},"Profile constraints: max "+profile.maxPos+"% per position · max β "+profile.maxBeta)
+      )
+    ),
+    e("div",{className:"builder-right"},
+      stats&&e(React.Fragment,null,
+        e("div",{className:"stat-grid"},
+          [["RETURN",(stats.ret>0?"+":"")+stats.ret+"%",stats.ret>=0?"up":"dn"],["VOL σ",stats.vol+"%",""],["SHARPE",stats.sh,stats.sh>=1?"up":stats.sh>=.5?"wa":"dn"],["BETA",stats.beta,""],["SORTINO",stats.so,""],["TREYNOR",stats.tr+"%",""],["VAR 95%",stats.var95+"%","dn"],["MAX DD",stats.maxDD+"%","dn"]].map(([l,v,cls])=>
+            e("div",{key:l,className:"stat-box"},e("div",{className:"stat-lbl"},l),e("div",{className:"stat-val "+cls},v))
+          )
+        ),
+        e("div",{className:"card"},
+          e("div",{className:"card-title"},"ALLOCATION"),
+          e("div",{className:"alloc-strip"},tickers.map((k,i)=>e("div",{key:k,className:"alloc-seg",style:{flex:weights[k],background:COLORS[i%COLORS.length]},title:k+" "+weights[k]+"%"}))),
+          e("div",{className:"alloc-legend"},tickers.map((k,i)=>e("span",{key:k},e("span",{className:"leg-dot",style:{background:COLORS[i%COLORS.length]}}),k+" "+weights[k]+"%")))
+        ),
+        e("div",{className:"card",style:{overflowX:"auto"}},
+          e("div",{className:"card-title"},"HOLDINGS DETAIL"),
+          e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11}},
+            e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540"}},
+              ["TICKER","NAME","TYPE","WT%","1Y RET","VOL","BETA","SHARPE","YIELD","FIT"].map(h=>e("th",{key:h,style:{padding:"3px 5px",textAlign:"left",fontSize:9,color:"#475569",fontWeight:"bold"}},h))
+            )),
+            e("tbody",null,tickers.map((k,i)=>{
+              const a=ASSETS.find(u=>u.id===k)||{};const fit=fitScore(a,profile);
+              return e("tr",{key:k,style:{borderBottom:"1px solid #06090f"}},
+                e("td",{style:{padding:"4px 5px",color:COLORS[i%COLORS.length],fontWeight:"bold"}},k),
+                e("td",{style:{padding:"4px 5px",color:"#64748b",maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},a.n),
+                e("td",{style:{padding:"4px 5px"}},e("span",{className:"type-badge",style:{background:(TC[a.t]||"#818cf8")+"22",color:TC[a.t]||"#818cf8"}},a.t)),
+                e("td",{style:{padding:"4px 5px",fontWeight:"bold"}},weights[k]+"%"),
+                e("td",{style:{padding:"4px 5px"},className:a.ret>=0?"up":"dn"},(a.ret>0?"+":"")+a.ret+"%"),
+                e("td",{style:{padding:"4px 5px"}},a.vol+"%"),
+                e("td",{style:{padding:"4px 5px"}},a.beta),
+                e("td",{style:{padding:"4px 5px",color:a.sh>=1?"#1D9E75":a.sh>=.5?"#f59e0b":"#ef4444"}},a.sh),
+                e("td",{style:{padding:"4px 5px"}},a.yld+"%"),
+                e("td",{style:{padding:"4px 5px",fontWeight:"bold",color:fit>=70?"#1D9E75":fit>=45?"#f59e0b":"#ef4444"}},fit)
+              );
+            }))
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── Metrics ───────────────────────────────────────────────────────────────────
+function Metrics({weights}){
+  const tickers=Object.keys(weights);
+  const s=tickers.length>0?calcStats(weights):null;
+  if(!s)return e("div",{className:"card",style:{textAlign:"center",padding:32}},e("div",{style:{color:"#475569"}},"Build a portfolio first."));
+  const mktRet=s.beta*24.2,alpha=s.ret-mktRet;
+  return e("div",null,
+    e("div",{className:"stat-grid",style:{gridTemplateColumns:"repeat(4,1fr)"}},
+      [["RETURN",(s.ret>0?"+":"")+s.ret+"%",s.ret>=0?"up":"dn"],["VOL σ",s.vol+"%",""],["SHARPE",s.sh,s.sh>=1?"up":s.sh>=.5?"wa":"dn"],["BETA",s.beta,""],["SORTINO",s.so,""],["TREYNOR",s.tr+"%",""],["VARIANCE",s.variance+" bps²",""],["MAX DD",s.maxDD+"%","dn"],["VAR 95%",s.var95+"%","dn"],["VAR 99%",s.var99+"%","dn"],["CVaR 95%",s.cvar95+"%","dn"],["CALMAR",s.calmar,""],["INFO RATIO",s.infoR,""],["DIV YIELD",s.divY+"%",""],["POSITIONS",tickers.length,""],["BENCH RET",mktRet.toFixed(2)+"%",""]].map(([l,v,cls])=>
+        e(StatBox,{key:l,label:l,value:v,cls,stats:s})
+      )
+    ),
+    e("div",{className:"two-col"},
+      e("div",null,
+        e("div",{className:"card"},e("div",{className:"card-title"},"RETURN ATTRIBUTION"),
+          [["Market (β×SPY)",mktRet.toFixed(2)+"%",mktRet>=0],["Alpha",alpha.toFixed(2)+"%",alpha>=0],["Dividend Income",s.divY+"%",true],["Total Return",s.ret+"%",s.ret>=0]].map(([l,v,pos])=>
+            e("div",{key:l,className:"data-row"},e("span",{className:"data-key"},l),e("span",{className:"data-val "+(pos?"up":"dn")},v))
+          )
+        ),
+        e("div",{className:"card"},e("div",{className:"card-title"},"STRESS TESTS"),
+          [["2008 Financial Crisis",s.s08],["2020 COVID Crash",s.s20],["2022 Rate Hike",s.s22]].map(([l,v])=>
+            e("div",{key:l,style:{marginBottom:9}},
+              e("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3,fontSize:11}},e("span",{style:{color:"#475569"}},l),e("span",{className:v>=0?"up":"dn",style:{fontWeight:"bold"}},(v>0?"+":"")+v.toFixed(1)+"%")),
+              e("div",{style:{height:5,background:"#06090f",borderRadius:3,overflow:"hidden"}},e("div",{style:{width:Math.min(Math.abs(v)/70*100,100)+"%",height:"100%",background:v>=0?"#1D9E75":"#ef4444",borderRadius:3}}))
+            )
+          )
+        )
+      ),
+      e("div",null,
+        e("div",{className:"card"},e("div",{className:"card-title"},"RISK CONTRIBUTION BY ASSET"),
+          s.rc.map((r,i)=>e("div",{key:r.k,className:"bar-row"},
+            e("div",{className:"bar-lbl"},r.k),
+            e("div",{className:"bar-bg"},e("div",{className:"bar-fill",style:{width:Math.min(r.pct,100)+"%",background:COLORS[i%COLORS.length]}})),
+            e("div",{className:"bar-val"},r.pct+"%")
+          ))
+        ),
+        e("div",{className:"card"},e("div",{className:"card-title"},"FACTOR EXPOSURES"),
+          [["Quality",Math.min(tickers.reduce((a,k)=>{const x=ASSETS.find(u=>u.id===k);return a+(x?.sh||0)*(weights[k]/100);},0)/1.5,1),"#1D9E75"],
+           ["Momentum",Math.min(Math.max(s.ret,0)/50,1),"#534AB7"],
+           ["Low Volatility",Math.max(1-s.vol/40,0),"#185FA5"],
+           ["Income/Yield",Math.min(s.divY/8,1),"#BA7517"],
+           ["Market Beta",Math.min(s.beta/2,1),"#993C1D"]
+          ].map(([l,v,c])=>e("div",{key:l,className:"bar-row"},
+            e("div",{className:"bar-lbl"},l),
+            e("div",{className:"bar-bg"},e("div",{className:"bar-fill",style:{width:(v*100).toFixed(0)+"%",background:c}})),
+            e("div",{className:"bar-val",style:{color:c}},(v*100).toFixed(0))
+          ))
+        )
+      )
+    )
+  );
+}
+
+// ── Correlations ──────────────────────────────────────────────────────────────
+function Correlations({weights,profile,backendOk}){
+  const tickers=Object.keys(weights);
+  const[regime,setRegime]=useState("blended");
+  const[matrix,setMatrix]=useState(null);
+  const[matTickers,setMatTickers]=useState([]);
+  const[diag,setDiag]=useState(null);
+  const[loading,setLoading]=useState(false);
+
+  // Fetch from backend when tickers or regime change
+  useEffect(()=>{
+    if(tickers.length<2||!backendOk)return;
+    let cancelled=false;
+    setLoading(true);
+    Promise.all([
+      apiFetch("/api/correlations",{tickers,regime,window:252}),
+      apiFetch("/api/correlation-diagnostics",{tickers,weights:Object.values(weights).map(w=>w/100)}),
+    ]).then(([corrData,diagData])=>{
+      if(cancelled)return;
+      setMatrix(corrData.matrix);setMatTickers(corrData.tickers);setDiag(diagData);
+    }).catch(()=>{}).finally(()=>{if(!cancelled)setLoading(false);});
+    return()=>{cancelled=true;};
+  },[tickers.join(","),regime,backendOk]);
+
+  if(tickers.length<2)return e("div",{className:"card",style:{textAlign:"center",padding:32}},e("div",{style:{color:"#475569"}},"Add at least 2 assets to see correlations."));
+
+  // Use backend matrix if available, otherwise fall back to local
+  const useBackend=matrix&&matTickers.length>0;
+  const displayTickers=useBackend?matTickers:tickers;
+  const n=displayTickers.length,cw=Math.max(30,Math.min(54,450/n));
+  const getVal=(i,j)=>useBackend?matrix[i][j]:getCorr(displayTickers[i],displayTickers[j]);
+
+  const pairs=[];for(let i=0;i<n;i++)for(let j=i+1;j<n;j++)pairs.push({a:displayTickers[i],b:displayTickers[j],r:getVal(i,j)});
+  const avg=pairs.reduce((a,p)=>a+p.r,0)/Math.max(pairs.length,1);
+  const cellStyle=v=>{
+    if(v>=.9)return{background:"#7f1d1d",color:"#fca5a5"};
+    if(v>=.75)return{background:"#7c2d12",color:"#fcd34d"};
+    if(v>=.5)return{background:"#1a1800",color:"#f59e0b"};
+    if(v>-.05)return{background:"#0a0f1c",color:"#64748b"};
+    return{background:"#0c1a2e",color:"#60a5fa"};
+  };
+  return e("div",null,
+    e("div",{className:"card"},
+      e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
+        e("div",{className:"card-title",style:{marginBottom:0}},"PAIRWISE CORRELATION MATRIX (ρ)",loading&&e("span",{className:"spin",style:{marginLeft:6,fontSize:10}},"◌")),
+        backendOk&&e("div",{style:{display:"flex",gap:3}},
+          ["normal","stress","blended"].map(r=>e("button",{key:r,className:"btn btn-xs"+(regime===r?" btn-p":""),onClick:()=>setRegime(r),style:{textTransform:"capitalize",fontSize:9}},r))
+        )
+      ),
+      e("div",{style:{overflowX:"auto"}},
+        e("div",{style:{display:"inline-flex",flexDirection:"column",gap:2}},
+          e("div",{style:{display:"flex",gap:2}},e("div",{style:{width:56}}),displayTickers.map(t=>e("div",{key:t,style:{width:cw,fontSize:9,textAlign:"center",color:"#334155",overflow:"hidden",textOverflow:"ellipsis"}},t))),
+          displayTickers.map((ti,ri)=>e("div",{key:ti,style:{display:"flex",gap:2,alignItems:"center"}},
+            e("div",{style:{width:56,fontSize:9,color:"#334155",textAlign:"right",paddingRight:4,overflow:"hidden",textOverflow:"ellipsis"}},ti),
+            displayTickers.map((tj,ci)=>{const v=getVal(ri,ci);return e("div",{key:tj,className:"corr-cell",style:{width:cw,...cellStyle(v)}},v.toFixed(2));})
+          ))
+        )
+      ),
+      diag?e("div",{className:"info-box",style:{marginTop:8}},diag.diversification_message):
+      e("div",{className:"info-box",style:{marginTop:8}},"Avg pairwise ρ: "+avg.toFixed(2)+" · High-corr pairs (ρ>0.75): "+pairs.filter(p=>p.r>.75).length+" · Hedging pairs (ρ<0): "+pairs.filter(p=>p.r<-.05).length)
+    ),
+    diag&&diag.warnings&&diag.warnings.length>0&&e("div",{className:"card"},
+      e("div",{className:"card-title"},"⚠ DIVERSIFICATION WARNINGS"),
+      diag.warnings.map((w,i)=>e("div",{key:i,className:"warn-box",style:{marginBottom:4}},w))
+    ),
+    e("div",{className:"two-col"},
+      e("div",{className:"card"},e("div",{className:"card-title"},"HIGH CORRELATION FLAGS"+(regime==="stress"?" (STRESS)":"")),
+        diag&&diag.high_corr_pairs_stress&&diag.high_corr_pairs_stress.length>0?
+          diag.high_corr_pairs_stress.map(p=>e("div",{key:p.ticker_a+p.ticker_b,className:"warn-box",style:{marginBottom:4}},"⚠ "+p.ticker_a+" / "+p.ticker_b+": ρ="+p.correlation.toFixed(2)+" — no diversification in crisis")):
+        pairs.filter(p=>p.r>.75).length===0?e("div",{style:{color:"#475569",fontSize:11}},"No high-correlation pairs — good diversification."):
+        pairs.filter(p=>p.r>.75).map(p=>e("div",{key:p.a+p.b,className:"warn-box",style:{marginBottom:4}},"⚠ "+p.a+" / "+p.b+": ρ="+p.r.toFixed(2)+" — limited diversification"))
+      ),
+      e("div",null,
+        e("div",{className:"card"},e("div",{className:"card-title"},"HEDGING PAIRS (ρ < 0)"),
+          diag&&diag.hedging_pairs&&diag.hedging_pairs.length>0?
+            diag.hedging_pairs.map(p=>e("div",{key:p.ticker_a+p.ticker_b,className:"info-box",style:{marginBottom:4}},"✓ "+p.ticker_a+" / "+p.ticker_b+": ρ="+p.correlation.toFixed(2)+" — hedging benefit")):
+          pairs.filter(p=>p.r<-.05).length===0?e("div",{style:{color:"#475569",fontSize:11}},"No negative-correlation pairs in this portfolio."):
+          pairs.filter(p=>p.r<-.05).map(p=>e("div",{key:p.a+p.b,className:"info-box",style:{marginBottom:4}},"✓ "+p.a+" / "+p.b+": ρ="+p.r.toFixed(2)+" — provides hedging benefit"))
+        ),
+        diag&&diag.reference_hedges&&diag.reference_hedges.length>0&&e("div",{className:"card"},
+          e("div",{className:"card-title"},"REFERENCE HEDGES (not in portfolio)"),
+          diag.reference_hedges.map(h=>e("div",{key:h.ticker,className:"data-row"},
+            e("span",{className:"data-key"},h.ticker),
+            e("span",{className:"data-val",style:{color:h.avg_corr_normal<0?"#60a5fa":h.avg_corr_normal<.3?"#1D9E75":"#f59e0b"}},
+              "ρ "+h.avg_corr_normal.toFixed(2)+(h.avg_corr_stress!=null?" → "+h.avg_corr_stress.toFixed(2)+" stress":""))
+          ))
+        )
+      )
+    )
+  );
+}
+
+// ── Efficient Frontier ────────────────────────────────────────────────────────
+function Frontier({weights,profile,backendOk}){
+  const tickers=Object.keys(weights);
+  const[bkData,setBkData]=useState(null);
+  const[loading,setLoading]=useState(false);
+
+  // Fetch from backend
+  useEffect(()=>{
+    if(tickers.length<2||!backendOk)return;
+    let cancelled=false;
+    setLoading(true);
+    apiFetch("/api/frontier",{
+      tickers,risk_score:profile?.score||null,n_points:80,
+      current_weights:Object.fromEntries(tickers.map(t=>[t,weights[t]])),
+    }).then(data=>{
+      if(!cancelled)setBkData(data);
+    }).catch(()=>{}).finally(()=>{if(!cancelled)setLoading(false);});
+    return()=>{cancelled=true;};
+  },[tickers.join(","),backendOk]);
+
+  if(tickers.length<2)return e("div",{className:"card",style:{textAlign:"center",padding:32}},e("div",{style:{color:"#475569"}},"Add at least 2 assets to compute the efficient frontier."));
+
+  // Local fallback Monte Carlo
+  const localPts=useMemo(()=>{
+    if(bkData)return null; // skip if backend data available
+    const arr=[];
+    for(let t=0;t<150;t++){
+      let ws=tickers.map(()=>Math.random());const sum=ws.reduce((a,b)=>a+b,0);ws=ws.map(w=>w/sum);
+      const wo={};tickers.forEach((k,i)=>wo[k]=ws[i]*100);const s=calcStats(wo);if(s)arr.push({x:s.vol,y:s.ret,sh:s.sh});
+    }
+    return arr;
+  },[tickers.join(","),bkData]);
+
+  const cs=calcStats(weights);
+
+  // Determine data source
+  let pts,maxSh,minVol,source;
+  if(bkData&&bkData.frontier&&bkData.frontier.length>0){
+    pts=bkData.frontier.map(p=>({x:+(p["return"]!=null?p.volatility*100:p.volatility),y:+(p["return"]!=null?p["return"]*100:p.ret),sh:p.sharpe||0}));
+    // Handle both percentage and decimal formats from backend
+    if(pts[0]&&pts[0].x<1)pts=bkData.frontier.map(p=>({x:p.volatility*100,y:p["return"]*100,sh:p.sharpe||0}));
+    maxSh={x:bkData.max_sharpe.volatility*100,y:bkData.max_sharpe["return"]*100,sh:bkData.max_sharpe.sharpe};
+    minVol={x:bkData.min_vol.volatility*100,y:bkData.min_vol["return"]*100,sh:bkData.min_vol.sharpe};
+    source="SLSQP";
+  }else if(localPts&&localPts.length>0){
+    pts=localPts;
+    maxSh=pts.reduce((a,b)=>b.sh>a.sh?b:a,pts[0]);
+    minVol=pts.reduce((a,b)=>b.x<a.x?b:a,pts[0]);
+    source="Monte Carlo";
+  }else{
+    return e("div",{className:"card"},e("div",{style:{color:"#475569"}},loading?e("span",null,e("span",{className:"spin"},"◌")," Computing efficient frontier via SLSQP..."):"Computing..."));
+  }
+
+  if(!cs)return e("div",{className:"card"},e("div",{style:{color:"#475569"}},"Computing..."));
+  const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);
+  const xMin=Math.min(...xs,cs.vol)-1,xMax=Math.max(...xs,cs.vol)+1;
+  const yMin=Math.min(...ys,cs.ret)-2,yMax=Math.max(...ys,cs.ret)+2;
+  const px=x=>50+((x-xMin)/(xMax-xMin||1))*490;
+  const py=y=>230-((y-yMin)/(yMax-yMin||1))*210;
+  return e("div",null,
+    e("div",{className:"card"},
+      e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
+        e("div",{className:"card-title",style:{marginBottom:0}},"EFFICIENT FRONTIER — RISK / RETURN"),
+        e("span",{style:{fontSize:9,color:"#334155",padding:"2px 7px",background:"#0d1228",borderRadius:6}},source==="SLSQP"?"⚡ SLSQP Optimizer":"⚠ Monte Carlo (250 trials)")
+      ),
+      e("div",{style:{overflowX:"auto"}},
+        e("svg",{width:"100%",viewBox:"0 0 550 250",style:{display:"block"}},
+          e("line",{x1:50,y1:230,x2:545,y2:230,stroke:"#1a2540",strokeWidth:".5"}),
+          e("line",{x1:50,y1:10,x2:50,y2:230,stroke:"#1a2540",strokeWidth:".5"}),
+          e("text",{x:297,y:247,textAnchor:"middle",fontSize:9,fill:"#475569"},"Volatility (%)"),
+          e("text",{x:12,y:125,textAnchor:"middle",fontSize:9,fill:"#475569",transform:"rotate(-90 12 125)"},"Return (%)"),
+          pts.map((p,i)=>e("circle",{key:i,cx:px(p.x),cy:py(p.y),r:3,fill:p.sh>=1?"rgba(29,158,117,.5)":p.sh>=.5?"rgba(245,158,11,.4)":"rgba(239,68,68,.25)"})),
+          e("circle",{cx:px(maxSh.x),cy:py(maxSh.y),r:6,fill:"#1D9E75",stroke:"#05080f",strokeWidth:"1.5"}),
+          e("circle",{cx:px(minVol.x),cy:py(minVol.y),r:6,fill:"#f59e0b",stroke:"#05080f",strokeWidth:"1.5"}),
+          e("polygon",{points:px(cs.vol)+","+(py(cs.ret)-7)+" "+(px(cs.vol)-6)+","+(py(cs.ret)+5)+" "+(px(cs.vol)+6)+","+(py(cs.ret)+5),fill:"#818cf8",stroke:"#05080f",strokeWidth:"1"}),
+          e("text",{x:540,y:16,textAnchor:"end",fontSize:9,fill:"#818cf8"},"▲ Your Portfolio"),
+          e("text",{x:540,y:28,textAnchor:"end",fontSize:9,fill:"#1D9E75"},"● Max Sharpe"),
+          e("text",{x:540,y:40,textAnchor:"end",fontSize:9,fill:"#f59e0b"},"● Min Volatility")
+        )
+      ),
+      e("div",{className:"info-box",style:{marginTop:6}},"Your portfolio: Return "+cs.ret+"% · Vol "+cs.vol+"% · Sharpe "+cs.sh+" · "+(cs.sh>=(maxSh?.sh*.9)?"Near optimal ✓":"Consider optimizing in Portfolio Builder"))
+    ),
+    e("div",{className:"card"},
+      e("div",{className:"card-title"},"KEY FRONTIER POINTS"),
+      e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11}},
+        e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540"}},
+          ["PORTFOLIO","RETURN","VOLATILITY","SHARPE"].map(h=>e("th",{key:h,style:{padding:"4px 7px",textAlign:"left",fontSize:9,color:"#475569",fontWeight:"bold"}},h))
+        )),
+        e("tbody",null,
+          [["Your Portfolio",cs.ret,cs.vol,cs.sh,"#818cf8"],["Max Sharpe",+maxSh.y.toFixed(2),+maxSh.x.toFixed(2),+maxSh.sh.toFixed(3),"#1D9E75"],["Min Volatility",+minVol.y.toFixed(2),+minVol.x.toFixed(2),+minVol.sh.toFixed(3),"#f59e0b"]].map(([l,r,v,sh,c])=>
+            e("tr",{key:l,style:{borderBottom:"1px solid #06090f"}},
+              e("td",{style:{padding:"5px 7px",fontWeight:"bold",color:c}},l),
+              e("td",{style:{padding:"5px 7px"},className:r>=0?"up":"dn"},(r>0?"+":"")+r+"%"),
+              e("td",{style:{padding:"5px 7px"}},v+"%"),
+              e("td",{style:{padding:"5px 7px",color:sh>=1?"#1D9E75":sh>=.5?"#f59e0b":"#ef4444",fontWeight:"bold"}},sh)
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── Trade Desk ────────────────────────────────────────────────────────────────
+function TradeDeck({weights,profile}){
+  const tickers=Object.keys(weights);
+  if(!tickers.length)return e("div",{className:"card",style:{textAlign:"center",padding:32}},e("div",{style:{color:"#475569"}},"Build a portfolio to see trade recommendations."));
+  const SIG_ACT={"Strong Buy":"buy","Buy":"buy","Hold":"hold","Sell":"sell","Strong Sell":"sell"};
+  const ACT={buy:{cls:"act-buy",l:"BUY"},sell:{cls:"act-sell",l:"SELL"},hold:{cls:"act-hold",l:"HOLD"}};
+  const trades=tickers.map(k=>{
+    const a=ASSETS.find(u=>u.id===k)||{};const fit=fitScore(a,profile);
+    const act=SIG_ACT[a.sig]||"hold";
+    const order=act==="buy"&&a.rsi&&a.rsi>65?"Limit":act==="buy"?"Market":act==="sell"?"Stop-Limit":"Monitor";
+    const hor=a.vol>35?"swing (1-4 wks)":a.vol>20?"medium (1-3 mo)":"core (3-12 mo)";
+    const rationale=act==="buy"?a.sig+" signal · RSI "+(a.rsi||"N/A")+" · MACD "+(a.macd||"N/A")+" · Sharpe "+a.sh+" · Fit "+fit+"/100":act==="sell"?"Weak signal · Vol "+a.vol+"% · Sharpe "+a.sh:"Neutral — hold, reassess on catalyst or earnings";
+    const limitEntry=act==="buy"&&a.rsi&&a.rsi>65&&a.tgt?+(a.tgt*.88).toFixed(2):null;
+    return{ticker:k,type:a.t,act,order,stop:a.stop,tgt:a.tgt,alloc:weights[k]+"%",hor,rationale,fit,limitEntry};
+  }).sort((a,b)=>b.fit-a.fit);
+  return e("div",null,
+    e("div",{className:"info-box",style:{marginBottom:10}},"⚠ Analytical recommendations only — not financial advice. Execute trades manually through your licensed broker."),
+    trades.map(tr=>{
+      const ac=ACT[tr.act];
+      return e("div",{key:tr.ticker,className:"trade-card"},
+        e("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}},
+          e("div",{style:{display:"flex",alignItems:"center",gap:7}},
+            e("span",{style:{fontSize:14,fontWeight:"bold",color:TC[tr.type]||"#818cf8"}},tr.ticker),
+            e("span",{className:"act-badge "+ac.cls},ac.l),
+            e("span",{className:"type-badge",style:{background:"#1a2540",color:"#64748b"}},tr.order),
+            e("span",{className:"type-badge",style:{background:"#1a2540",color:"#64748b"}},tr.hor)
+          ),
+          e("span",{style:{fontSize:10,color:"#334155"}},tr.alloc)
+        ),
+        e("div",{style:{fontSize:11,color:"#475569",marginBottom:6,lineHeight:1.5}},tr.rationale),
+        e("div",{className:"price-grid"},
+          tr.limitEntry&&e("div",{className:"price-box"},e("div",{className:"price-lbl"},"LIMIT ENTRY"),e("div",{className:"price-val",style:{color:"#818cf8"}},"$"+tr.limitEntry)),
+          e("div",{className:"price-box"},e("div",{className:"price-lbl"},"STOP LOSS"),e("div",{className:"price-val dn"},tr.stop?"$"+tr.stop:"—")),
+          e("div",{className:"price-box"},e("div",{className:"price-lbl"},"TARGET"),e("div",{className:"price-val up"},tr.tgt?"$"+tr.tgt:"—")),
+          e("div",{className:"price-box"},e("div",{className:"price-lbl"},"FIT SCORE"),e("div",{className:"price-val",style:{color:tr.fit>=70?"#1D9E75":tr.fit>=45?"#f59e0b":"#ef4444"}},tr.fit+"/100"))
+        )
+      );
+    })
+  );
+}
+
+// ── Compare ───────────────────────────────────────────────────────────────────
+function Compare({ports}){
+  const pl=Object.entries(ports).filter(([,w])=>Object.keys(w).length>0);
+  if(pl.length<2)return e("div",{className:"card",style:{textAlign:"center",padding:36}},e("div",{style:{fontSize:20,marginBottom:8}},"⇄"),e("div",{style:{color:"#475569"}},"Build at least 2 portfolios to compare them side by side."));
+  const sl=pl.map(([n,w])=>({n,w,s:calcStats(w)}));
+  const gv=(s,k)=>s?.[k];
+  const gb=(k,hb)=>{const vs=sl.map(x=>gv(x.s,k)).filter(v=>v!=null);return hb?Math.max(...vs):Math.min(...vs);};
+  const groups=[
+    {l:"RETURNS & INCOME",ms:[{k:"ret",l:"Expected Return",f:v=>(v>0?"+":"")+v+"%",hb:true},{k:"divY",l:"Dividend Yield",f:v=>v+"%",hb:true},{k:"infoR",l:"Info Ratio",f:v=>v,hb:true}]},
+    {l:"RISK-ADJUSTED",ms:[{k:"sh",l:"Sharpe",f:v=>v,hb:true},{k:"so",l:"Sortino",f:v=>v,hb:true},{k:"calmar",l:"Calmar",f:v=>v,hb:true},{k:"tr",l:"Treynor",f:v=>v+"%",hb:true}]},
+    {l:"RISK",ms:[{k:"vol",l:"Volatility σ",f:v=>v+"%",hb:false},{k:"beta",l:"Beta",f:v=>v,hb:false},{k:"maxDD",l:"Max Drawdown",f:v=>v+"%",hb:false},{k:"var95",l:"VaR 95%",f:v=>v+"%",hb:false}]},
+    {l:"STRESS TESTS",ms:[{k:"s08",l:"2008 Crisis",f:v=>(v>0?"+":"")+v+"%",hb:true},{k:"s20",l:"2020 COVID",f:v=>(v>0?"+":"")+v+"%",hb:true},{k:"s22",l:"2022 Rate Hike",f:v=>(v>0?"+":"")+v+"%",hb:true}]},
+  ];
+  return e("div",null,
+    e("div",{className:"cmp-hdr"},
+      e("div",{style:{width:147,flexShrink:0}}),
+      sl.map(({n,w})=>{const ks=Object.keys(w);return e("div",{key:n,className:"cmp-port"},e("div",{style:{fontSize:13,fontWeight:"bold",color:"#f1f5f9",marginBottom:4}},n),e("div",{style:{fontSize:10,color:"#334155",marginBottom:6}},ks.length+" positions"),e("div",{style:{display:"flex",height:7,borderRadius:3,overflow:"hidden",gap:1,marginBottom:5}},ks.map((k,i)=>e("div",{key:k,style:{flex:w[k],background:COLORS[i%COLORS.length]},title:k+": "+w[k]+"%"}))),e("div",{style:{display:"flex",flexWrap:"wrap",gap:3}},ks.slice(0,5).map((k,i)=>e("span",{key:k,style:{fontSize:9,padding:"1px 4px",borderRadius:4,background:COLORS[i%COLORS.length]+"22",color:COLORS[i%COLORS.length]}},k)),ks.length>5&&e("span",{style:{fontSize:9,color:"#334155"}},"+"+( ks.length-5))));})
+    ),
+    e("div",{style:{background:"#080d1a",border:"1px solid #1a2540",borderRadius:8,overflow:"hidden"}},
+      groups.map(({l,ms})=>e("div",{key:l},
+        e("div",{className:"cmp-sec"},e("div",{style:{width:147,flexShrink:0}},l),sl.map(({n})=>e("div",{key:n,style:{flex:1,textAlign:"center"}},n))),
+        ms.map(({k,l:ml,f,hb})=>{
+          const best=gb(k,hb);
+          return e("div",{key:k,className:"cmp-row"},
+            e("div",{className:"cmp-lbl"},ml),
+            sl.map(({n,s})=>{const val=gv(s,k);const isW=val!=null&&Math.abs(val-best)<.001;return e("div",{key:n,className:"cmp-cell"+(isW?" cmp-win":"")},val!=null?f(val):"—",isW&&e("span",{style:{fontSize:9,marginLeft:3}},"★"));})
+          );
+        })
+      ))
+    ),
+    e("div",{className:"info-box",style:{marginTop:7}},"★ marks the best value per metric across your portfolios.")
+  );
+}
+
+// ── AI Adviser ────────────────────────────────────────────────────────────────
+function Advisor({profile,ports,activePort}){
+  const[msgs,setMsgs]=useState([{r:"ai",t:"Welcome to Quantex AI — powered by Claude.\n\nComplete ① PROFILE first. Assets in Discovery are then ranked by Fit Score for your specific profile, goal, and time horizon.\n\nAsk me anything about your portfolio, risk, or strategy."}]);
+  const[inp,setInp]=useState("");
+  const[loading,setLoading]=useState(false);
+  const[apiKey,setApiKey]=useState(()=>{try{return localStorage.getItem("qx_api_key")||"";}catch(e){return"";}});
+  const[showKey,setShowKey]=useState(false);
+  const br=useRef();
+  useEffect(()=>br.current?.scrollIntoView({behavior:"smooth"}),[msgs]);
+  useEffect(()=>{try{if(apiKey)localStorage.setItem("qx_api_key",apiKey);else localStorage.removeItem("qx_api_key");}catch(e){}},[apiKey]);
+
+  const getCtx=()=>{
+    const w=ports[activePort]||{};const s=Object.keys(w).length>0?calcStats(w):null;
+    return "PROFILE: Score "+(profile?.score||"?")+"/100, "+(profile?.cat||"?")+", Goal: "+(profile?.goal||"?")+", Horizon: "+(profile?.hor||"?")+", Equity: "+(profile?.eq||"?")+"%,  Bonds: "+(profile?.bd||"?")+"%, Max Position: "+(profile?.maxPos||"?")+"%, Max Beta: "+(profile?.maxBeta||"?")+", Options Eligible: "+(profile?.optElig?"yes":"no")+".\nPORTFOLIO "+activePort+": "+Object.keys(w).length+" positions: "+Object.entries(w).map(([k,v])=>k+" "+v+"%").join(", ")+".\n"+(s?"Stats: Return "+s.ret+"%, Vol "+s.vol+"%, Sharpe "+s.sh+", Beta "+s.beta+", Sortino "+s.so+", VaR95 "+s.var95+"%, MaxDD "+s.maxDD+"%, DivYield "+s.divY+"%, 2008 stress "+s.s08+"%, 2020 stress "+s.s20+"%, 2022 stress "+s.s22+"%.":" No portfolio data yet.");
+  };
+
+  const askClaude=async(msg)=>{
+    setLoading(true);
+    const sysPrompt="You are Quantex AI, a professional financial adviser assistant. Current investor context:\n"+getCtx()+"\n\nBe concise (under 200 words). Reference actual portfolio numbers when relevant. Note this is analytical guidance, not regulated financial advice. Plain text only, no markdown.";
+    try{
+      // Try server proxy first (no API key needed)
+      if(BACKEND_URL||location.hostname!=="localhost"){
+        try{
+          const proxyResp=await fetch((BACKEND_URL||"")+"/api/ai/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:sysPrompt,message:msg})});
+          if(proxyResp.ok){const d=await proxyResp.json();setMsgs(m=>[...m,{r:"ai",t:d.response}]);setLoading(false);return;}
+        }catch(e){/* fall through to direct */}
+      }
+      // Fall back to direct API key
+      if(!apiKey){setMsgs(m=>[...m,{r:"ai",t:"AI features are available when either:\n• The server has an ANTHROPIC_API_KEY configured, or\n• You enter your own key via the ⚙ icon above.\n\nGet a key at console.anthropic.com"}]);setLoading(false);return;}
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,system:sysPrompt,messages:[{role:"user",content:msg}]})});
+      const data=await resp.json();
+      if(data.error)throw new Error(data.error.message||"API error");
+      const text=data.content?.map(c=>c.text||"").join("")||"Unable to get a response.";
+      setMsgs(m=>[...m,{r:"ai",t:text}]);
+    }catch(err){
+      setMsgs(m=>[...m,{r:"ai",t:"Error: "+err.message+"\n\nTry entering your API key via ⚙ above."}]);
+    }finally{setLoading(false);}
+  };
+
+  const send=()=>{if(!inp.trim()||loading)return;const u=inp.trim();setInp("");setMsgs(m=>[...m,{r:"usr",t:u}]);askClaude(u);};
+  const QUICK=["Analyze my portfolio","Explain my Sharpe ratio","What should I hedge?","Best assets for my profile?","Should I rebalance?"];
+
+  return e(React.Fragment,null,
+    e("div",{className:"adv-hdr"},"AI ADVISER",e("div",{style:{display:"flex",alignItems:"center",gap:6}},e("span",{className:"adv-badge"},apiKey?"Claude ✓":"No Key"),e("button",{onClick:()=>setShowKey(!showKey),style:{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:11}},"⚙"))),
+    showKey&&e("div",{style:{padding:"6px 10px",background:"#06090f",borderBottom:"1px solid #1a2540",fontSize:10}},
+      e("div",{style:{color:"#475569",marginBottom:4}},"Anthropic API Key",e("span",{style:{color:"#334155",marginLeft:4}},"(stored locally, never sent to any server except Anthropic)")),
+      e("input",{type:"password",value:apiKey,onChange:ev=>setApiKey(ev.target.value),placeholder:"sk-ant-...",style:{width:"100%",padding:"4px 7px",background:"#080d1a",border:"1px solid #1a2540",borderRadius:5,color:"#cbd5e1",fontSize:10,fontFamily:"monospace"}})
+    ),
+    e("div",{className:"adv-msgs"},
+      msgs.map((m,i)=>e("div",{key:i,className:m.r==="ai"?"msg-ai":"msg-user"},e("div",{className:"msg-who"},m.r==="ai"?"CLAUDE":"YOU"),e("div",{className:"msg-text",style:{whiteSpace:"pre-wrap"}},m.t))),
+      loading&&e("div",{className:"msg-ai"},e("div",{className:"msg-who"},"CLAUDE"),e("div",{className:"msg-text"},e("span",{className:"spin"},"◌")," Thinking...")),
+      e("div",{ref:br})
+    ),
+    e("div",{className:"quick-btns"},QUICK.map(q=>e("button",{key:q,className:"q-btn",disabled:loading,onClick:()=>{setMsgs(m=>[...m,{r:"usr",t:q}]);askClaude(q);}},q))),
+    e("div",{className:"adv-input-row"},
+      e("input",{className:"adv-input",value:inp,onChange:ev=>setInp(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&!loading&&send(),placeholder:"Ask anything...",disabled:loading}),
+      e("button",{className:"adv-send",onClick:send,disabled:loading||!inp.trim()},loading?"…":"ASK")
+    )
+  );
+}
+
+// ── CFA Education Data ────────────────────────────────────────────────────────
+const CFA_ED={
+  "RETURN":{level:"I",reading:"Portfolio Risk and Return: Part I",formula:"Rp = Σ(wi × Ri)",desc:"Portfolio return is the weighted average of individual asset returns.",work:(s)=>"Your portfolio return of "+s.ret+"% is the sum of each position's return weighted by its allocation. If AAPL is 20% of your portfolio and returned 25%, it contributed 5% (20% × 25%)."},
+  "VOL σ":{level:"I",reading:"Portfolio Risk and Return: Part I",formula:"σp = √(wᵀΣw)",desc:"Portfolio volatility measures total risk. Unlike individual vol, it accounts for diversification through the covariance matrix.",work:(s)=>"Your portfolio vol of "+s.vol+"% is LESS than the weighted average of individual vols because of diversification — correlations between your holdings reduce total risk."},
+  "SHARPE":{level:"I",reading:"Portfolio Risk and Return: Part I",formula:"S = (Rp − Rf) / σp",desc:"Excess return per unit of total risk. Higher is better. Above 1.0 is good, above 2.0 is exceptional.",work:(s)=>"Your Sharpe of "+s.sh+" = ("+s.ret+"% − 4.3%) / "+s.vol+"%. You earn "+s.sh+" units of excess return for each unit of risk. "+(s.sh>=1?"This is above 1.0 — solid risk-adjusted performance.":"Below 1.0 — consider optimizing to improve risk-adjusted returns.")},
+  "BETA":{level:"I",reading:"Portfolio Risk and Return: Part II",formula:"βp = Σ(wi × βi)",desc:"Portfolio sensitivity to market moves. β=1.0 means you move with the market. β>1 amplifies, β<1 dampens.",work:(s)=>"Your beta of "+s.beta+" means if the market moves 10%, your portfolio moves approximately "+(s.beta*10).toFixed(1)+"%. "+(s.beta>1.2?"High beta — more aggressive than the market.":s.beta<0.8?"Low beta — defensive positioning.":"Near-market sensitivity.")},
+  "SORTINO":{level:"II",reading:"Portfolio Risk and Return: Part II",formula:"Sortino = (Rp − Rf) / σ_downside",desc:"Like Sharpe but only penalizes downside volatility. Upside volatility is desirable — Sortino doesn't count it against you.",work:(s)=>"Your Sortino of "+s.so+" uses only negative returns in the denominator. Compare to your Sharpe of "+s.sh+" — if Sortino is higher, your volatility is skewed positive (more up moves than down)."},
+  "TREYNOR":{level:"I",reading:"Portfolio Risk and Return: Part II",formula:"T = (Rp − Rf) / βp",desc:"Excess return per unit of systematic (market) risk. Unlike Sharpe, ignores diversifiable risk.",work:(s)=>"Your Treynor of "+s.tr+"% = ("+s.ret+"% − 4.3%) / "+s.beta+". This measures how well you're compensated for market risk specifically, not total risk."},
+  "VAR 95%":{level:"II",reading:"Measuring and Managing Market Risk",formula:"VaR₉₅ = −(μ − 1.645σ) [daily]",desc:"Maximum expected daily loss with 95% confidence. 5% of days could be worse than this.",work:(s)=>"Your daily VaR of "+s.var95+"% means on 95% of days, your loss won't exceed "+s.var95+"% of portfolio value. On a $100K portfolio, that's $"+(s.var95*1000).toFixed(0)+"/day max expected loss."},
+  "VAR 99%":{level:"II",reading:"Measuring and Managing Market Risk",formula:"VaR₉₉ = −(μ − 2.326σ) [daily]",desc:"Maximum expected daily loss with 99% confidence. Only 1% of days should be worse.",work:(s)=>"Your 99% VaR of "+s.var99+"% is stricter than the 95% VaR of "+s.var95+"%. On a $100K portfolio: $"+(s.var99*1000).toFixed(0)+"/day. The gap between them reveals tail risk."},
+  "CVaR 95%":{level:"II",reading:"Measuring and Managing Market Risk",formula:"CVaR = E[Loss | Loss > VaR]",desc:"Expected Shortfall — the average loss in the worst 5% of scenarios. Captures tail risk better than VaR.",work:(s)=>"Your CVaR of "+s.cvar95+"% is worse than VaR of "+s.var95+"% because CVaR asks: 'When things go bad, HOW bad?' VaR just marks the threshold; CVaR measures the depth."},
+  "MAX DD":{level:"I",reading:"Portfolio Risk and Return: Part I",formula:"MDD = (Trough − Peak) / Peak",desc:"Worst peak-to-trough decline. The most pain an investor would have experienced.",work:(s)=>"Your max drawdown of "+s.maxDD+"% means at worst, the portfolio fell "+Math.abs(s.maxDD).toFixed(1)+"% from its high. On $100K, that's a $"+Math.abs(s.maxDD*1000).toFixed(0)+" paper loss before recovery."},
+  "CALMAR":{level:"II",reading:"Portfolio Management",formula:"Calmar = Ann. Return / |Max DD|",desc:"Return per unit of drawdown risk. Higher means better recovery relative to worst decline.",work:(s)=>"Your Calmar of "+s.calmar+" = "+s.ret+"% / "+Math.abs(s.maxDD).toFixed(1)+"%. "+(s.calmar>1?"Above 1.0 — your returns more than compensate for the worst drawdown.":"Below 1.0 — the drawdown was larger than your return.")},
+  "INFO RATIO":{level:"II",reading:"Active Portfolio Management",formula:"IR = (Rp − Rb) / σ(Rp − Rb)",desc:"Active return per unit of tracking error. Measures skill of active management vs benchmark.",work:(s)=>"Your IR of "+s.infoR+" measures excess return over the S&P 500 per unit of deviation from it. IR > 0.5 is considered skilled. IR < 0 means you'd have been better in an index fund."},
+  "DIV YIELD":{level:"I",reading:"Equity Valuation",formula:"Yield = Annual Dividends / Price",desc:"Income generated per dollar invested. Higher yield = more income, but very high yields can signal risk.",work:(s)=>"Your portfolio yields "+s.divY+"%. On $100K invested, that's ~$"+(s.divY*1000).toFixed(0)+"/year in dividend income before taxes."},
+  "VARIANCE":{level:"I",reading:"Portfolio Risk and Return: Part I",formula:"σ² = wᵀΣw",desc:"Variance is volatility squared. The raw measure of dispersion. Useful in optimization math.",work:(s)=>"Your variance of "+s.variance+" bps² = ("+s.vol+"%)². Portfolio variance benefits from diversification — it's less than the weighted sum of individual variances."},
+};
+
+// CFA Explainer popup component
+function CfaExplainer({concept,stats,onClose}){
+  const d=CFA_ED[concept];
+  if(!d)return null;
+  return e("div",{className:"edu-pop",onClick:ev=>ev.stopPropagation()},
+    e("button",{className:"edu-close",onClick:onClose},"✕"),
+    e("div",{style:{display:"flex",alignItems:"center",gap:6,marginBottom:6}},
+      e("span",{className:"cfa-tag"},"CFA L"+d.level),
+      e("span",{style:{fontSize:9,color:"#475569"}},d.reading)
+    ),
+    e("div",{style:{fontSize:13,fontWeight:"bold",color:"#f1f5f9",marginBottom:4}},concept),
+    e("div",{className:"edu-formula"},d.formula),
+    e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.6}},d.desc),
+    stats&&d.work&&e("div",{className:"edu-worked"},
+      e("div",{style:{fontSize:9,fontWeight:"bold",color:"#60a5fa",marginBottom:4,letterSpacing:1}},"YOUR PORTFOLIO"),
+      d.work(stats)
+    )
+  );
+}
+
+// Stat box with (?) icon
+function StatBox({label,value,cls,stats}){
+  const[show,setShow]=useState(false);
+  const hasCfa=!!CFA_ED[label];
+  return e("div",{className:"stat-box",style:{position:"relative"}},
+    e("div",{className:"stat-lbl"},label,hasCfa&&e("button",{className:"q-icon",onClick:ev=>{ev.stopPropagation();setShow(!show);}},"?")),
+    e("div",{className:"stat-val "+cls},value),
+    show&&e(CfaExplainer,{concept:label,stats,onClose:()=>setShow(false)})
+  );
+}
+
+// ── Concept Challenges ───────────────────────────────────────────────────────
+function Challenges({profile,ports,activePort}){
+  const[completed,setCompleted]=useState(()=>{try{return JSON.parse(localStorage.getItem("qx_challenges")||"[]");}catch(e){return[];}});
+  const[active,setActive]=useState(0);
+  useEffect(()=>{try{localStorage.setItem("qx_challenges",JSON.stringify(completed));}catch(e){}},[completed]);
+
+  const aw=ports[activePort]||{};
+  const tickers=Object.keys(aw);
+  const s=tickers.length>0?calcStats(aw):null;
+
+  const CHALLENGES=[
+    {id:"sharpe_1",title:"Build a Sharpe Machine",level:"L1",topic:"Portfolio Optimization",
+     desc:"Build a portfolio with a Sharpe ratio above 1.0 using exactly 8 positions from Discovery. No single position can exceed 20%.",
+     check:()=>s&&s.sh>=1.0&&tickers.length===8&&Object.values(aw).every(w=>w<=20),
+     hint:"Focus on high-Sharpe assets like MSFT, COST, LLY. Diversify across sectors to reduce volatility without sacrificing return.",
+     explain:"The Sharpe ratio measures excess return per unit of risk. By constraining to 8 positions and 20% max weight, you're forced to diversify. The challenge teaches that Sharpe improves through diversification (reducing σ) not just picking high-return assets.",
+     reward:"You demonstrated that diversified portfolio construction produces better risk-adjusted returns than concentration."},
+    {id:"beta_target",title:"Beta Commander",level:"L1",topic:"Systematic Risk",
+     desc:"Build a portfolio with a beta between 0.70 and 0.80. Use at least 5 positions.",
+     check:()=>s&&s.beta>=0.70&&s.beta<=0.80&&tickers.length>=5,
+     hint:"Mix low-beta defensive stocks (JNJ, PG, GLD) with moderate-beta names. Avoid high-beta tech.",
+     explain:"Portfolio beta is the weighted average of individual betas. β < 1 means the portfolio moves less than the market — a defensive stance. This challenge teaches you to control systematic risk through asset selection and weighting.",
+     reward:"You built a defensive portfolio that should fall less than the market in downturns while still participating in upside."},
+    {id:"income_port",title:"Yield Hunter",level:"L1",topic:"Income Investing",
+     desc:"Build a portfolio with a dividend yield above 3.0% while keeping Sharpe above 0.5.",
+     check:()=>s&&s.divY>=3.0&&s.sh>=0.5,
+     hint:"Bond ETFs (HYG), REITs (O, VNQ), and dividend stocks (JNJ, XOM, PG) are your tools. Balance yield with quality.",
+     explain:"High yield often comes with high risk or low growth. The constraint on Sharpe > 0.5 forces you to find quality income — not just reach for yield. This mirrors real portfolio construction for income-focused investors.",
+     reward:"You balanced income generation with risk-adjusted quality — the core skill for managing retirement portfolios."},
+    {id:"low_vol",title:"Calm Waters",level:"L2",topic:"Risk Management",
+     desc:"Build a portfolio with annualized volatility below 15% while achieving return above 8%. Use at least 6 positions.",
+     check:()=>s&&s.vol<15&&s.ret>8&&tickers.length>=6,
+     hint:"This requires genuine diversification. Mix asset classes: bonds, gold (GLD), low-vol stocks (JNJ, PG), and moderate equities. Correlation matters more than individual vol here.",
+     explain:"Low portfolio volatility comes from two sources: low-vol assets AND low correlations between them. A 10% vol stock and a 10% vol bond together produce a portfolio with LESS than 10% vol because they don't move together. This is the fundamental insight of Modern Portfolio Theory.",
+     reward:"You demonstrated that diversification creates portfolios with less risk than any individual component — the free lunch of finance."},
+    {id:"max_drawdown",title:"Drawdown Defender",level:"L2",topic:"Tail Risk",
+     desc:"Build a portfolio where the estimated max drawdown is better (less negative) than -25%. Maintain at least 10% expected return.",
+     check:()=>s&&s.maxDD>-25&&s.ret>=10,
+     hint:"Max drawdown is driven by the worst-performing assets in a crisis. Include negative-beta or low-correlation assets (GLD, bonds, TIPS) to cushion drawdowns.",
+     explain:"Max drawdown measures the worst peak-to-trough decline — the number that makes investors panic-sell. Managing it requires understanding stress correlations: assets that seem uncorrelated in normal markets can become highly correlated in crashes. True drawdown defense comes from assets that appreciate during crises.",
+     reward:"You built a portfolio that limits crisis losses while maintaining attractive returns — the Holy Grail of institutional portfolio management."},
+    {id:"risk_parity",title:"Equal Risk Allocator",level:"III",topic:"Risk Parity",
+     desc:"Build a portfolio where no single position contributes more than 25% of total portfolio risk. Use at least 6 positions.",
+     check:()=>{
+       if(!s||!s.rc||tickers.length<6)return false;
+       return s.rc.every(r=>r.pct<=25);
+     },
+     hint:"High-vol assets need smaller weights. If NVDA has 3x the vol of GLD, it should get roughly 1/3 the weight to contribute equal risk. Use the risk contribution bars in the Metrics tab.",
+     explain:"Traditional 60/40 portfolios put 60% in stocks and 40% in bonds by capital, but stocks contribute ~90% of risk. Risk parity allocates so each position contributes equally to portfolio risk. This requires smaller weights for volatile assets and larger weights for stable ones.",
+     reward:"You applied the risk parity framework used by Bridgewater's All Weather Fund — weighting by risk contribution, not capital."},
+    {id:"alpha_gen",title:"Alpha Generator",level:"II",topic:"Active Management",
+     desc:"Build a portfolio that outperforms the benchmark (SPY return of 24.2%) while keeping beta below 1.0.",
+     check:()=>s&&s.ret>24.2&&s.beta<1.0,
+     hint:"This is the definition of alpha — excess return not explained by market exposure. You need high-conviction picks that outperform on their own merits. Look for high Sharpe + low beta.",
+     explain:"Alpha = portfolio return − (beta × market return). Positive alpha means you beat the market on a risk-adjusted basis. Achieving alpha with β < 1 means your outperformance comes from stock selection, not just taking more market risk. This is the gold standard of active management.",
+     reward:"You generated genuine alpha — outperformance beyond what market exposure explains. This is what hedge fund managers get paid for."},
+    {id:"deriv_covered",title:"Income Engineer",level:"III",topic:"Derivatives Strategies",
+     desc:"Go to the Derivatives tab. Set up a covered call on a stock priced at $250 with a strike of $265 and 3 months to expiration. What is the premium collected and the maximum profit?",
+     check:()=>completed.includes("deriv_covered"),
+     hint:"In the Derivatives tab, set Spot=$250, select 'Covered Call'. The call strike defaults to ~5% OTM. Check the max profit in the Risk/Reward panel — it's (strike - spot + premium) × 100.",
+     explain:"A covered call sacrifices unlimited upside for certain income (the premium). It's the most common options strategy in the world. The breakeven is spot minus premium. You profit at any price above that. Maximum profit occurs when the stock closes exactly at the strike.",
+     reward:"You understand the most fundamental options income strategy — the building block for more complex derivatives overlays.",
+     selfCheck:true},
+  ];
+
+  const completedCount=CHALLENGES.filter(c=>completed.includes(c.id)||(c.check&&c.check())).length;
+  const progress=completedCount/CHALLENGES.length*100;
+
+  // Auto-check challenges
+  useEffect(()=>{
+    CHALLENGES.forEach(c=>{
+      if(c.check&&c.check()&&!completed.includes(c.id)){
+        setCompleted(prev=>[...prev,c.id]);
+      }
+    });
+  },[s,tickers.length]);
+
+  const ch=CHALLENGES[active];
+  const isComplete=completed.includes(ch.id)||(ch.check&&ch.check());
+
+  return e("div",null,
+    e("div",{className:"card"},
+      e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
+        e("div",null,
+          e("div",{className:"card-title",style:{marginBottom:2}},"CFA CONCEPT CHALLENGES"),
+          e("div",{style:{fontSize:10,color:"#475569"}},completedCount+"/"+CHALLENGES.length+" completed")
+        ),
+        e("div",{style:{display:"flex",alignItems:"center",gap:8}},
+          ["L1","L2","L3"].map(l=>e("span",{key:l,className:"cfa-tag"},l)),
+          e("span",{style:{fontSize:11,fontWeight:"bold",color:"#818cf8"}},Math.round(progress)+"%")
+        )
+      ),
+      e("div",{className:"ch-prog"},e("div",{className:"ch-prog-fill",style:{width:progress+"%",background:progress>=80?"#1D9E75":progress>=40?"#818cf8":"#f59e0b"}}))
+    ),
+
+    e("div",{style:{display:"grid",gridTemplateColumns:"240px 1fr",gap:12}},
+      // Challenge list
+      e("div",null,
+        CHALLENGES.map((c,i)=>{
+          const done=completed.includes(c.id)||(c.check&&c.check());
+          return e("div",{key:c.id,className:"ch-card"+(done?" complete":"")+(active===i?" active":""),onClick:()=>setActive(i),style:{cursor:"pointer",padding:10}},
+            e("div",{style:{display:"flex",alignItems:"center",gap:8}},
+              e("div",{className:"ch-num "+(done?"ch-check":"ch-pend")},done?"✓":i+1),
+              e("div",null,
+                e("div",{style:{fontSize:11,fontWeight:"bold",color:done?"#1D9E75":"#f1f5f9"}},c.title),
+                e("div",{style:{fontSize:9,color:"#475569"}},e("span",{className:"cfa-tag",style:{marginRight:4}},c.level),c.topic)
+              )
+            )
+          );
+        })
+      ),
+
+      // Active challenge detail
+      e("div",null,
+        e("div",{className:"card"+(isComplete?" complete":"")},
+          e("div",{style:{display:"flex",alignItems:"center",gap:8,marginBottom:10}},
+            e("div",{className:"ch-num "+(isComplete?"ch-check":"ch-pend"),style:{width:32,height:32,fontSize:14}},isComplete?"✓":active+1),
+            e("div",null,
+              e("div",{style:{fontSize:15,fontWeight:"bold",color:"#f1f5f9"}},ch.title),
+              e("div",{style:{display:"flex",gap:4,marginTop:2}},e("span",{className:"cfa-tag"},ch.level),e("span",{className:"cfa-tag",style:{background:"#0c1a2e",color:"#93c5fd"}},ch.topic))
+            )
+          ),
+          e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.7,marginBottom:12,padding:"10px 12px",background:"#06090f",borderRadius:7}},ch.desc),
+
+          isComplete?e("div",null,
+            e("div",{style:{background:"#0d2818",border:"1px solid #065f46",borderRadius:7,padding:10,marginBottom:10}},
+              e("div",{style:{fontSize:10,fontWeight:"bold",color:"#1D9E75",letterSpacing:1,marginBottom:4}},"✓ CHALLENGE COMPLETE"),
+              e("div",{style:{fontSize:11,color:"#6ee7b7",lineHeight:1.6}},ch.reward)
+            ),
+            e("div",{className:"card",style:{background:"#06090f"}},
+              e("div",{className:"card-title"},"WHY THIS MATTERS"),
+              e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.7}},ch.explain)
+            )
+          ):e("div",null,
+            s&&e("div",{style:{marginBottom:10}},
+              e("div",{style:{fontSize:10,fontWeight:"bold",color:"#475569",letterSpacing:1,marginBottom:6}},"CURRENT PORTFOLIO STATUS"),
+              e("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+                [["Positions",tickers.length],["Return",s?s.ret+"%":"—"],["Vol",s?s.vol+"%":"—"],["Sharpe",s?s.sh:"—"],["Beta",s?s.beta:"—"],["Div Yield",s?s.divY+"%":"—"],["Max DD",s?s.maxDD+"%":"—"]].map(([l,v])=>
+                  e("div",{key:l,style:{padding:"3px 8px",background:"#06090f",borderRadius:4,fontSize:10}},e("span",{style:{color:"#475569"}},l+": "),e("span",{style:{fontWeight:"bold"}},v))
+                )
+              )
+            ),
+            e("div",{className:"info-box"},
+              e("div",{style:{fontSize:10,fontWeight:"bold",color:"#60a5fa",marginBottom:3}},"💡 HINT"),
+              e("div",{style:{fontSize:11}},ch.hint)
+            ),
+            ch.selfCheck&&e("button",{className:"btn btn-p",style:{marginTop:10},onClick:()=>setCompleted(prev=>[...prev,ch.id])},"Mark as Complete")
+          )
+        ),
+
+        !isComplete&&e("div",{className:"card",style:{background:"#06090f"}},
+          e("div",{className:"card-title"},"WHAT YOU'LL LEARN"),
+          e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.7}},ch.explain)
+        )
+      )
+    )
+  );
+}
+
+// ── Paper Trading ─────────────────────────────────────────────────────────────
+function PaperTrading({backendOk}){
+  const[cash,setCash]=useState(100000);
+  const[positions,setPositions]=useState({});  // ticker → {shares, avgCost, firstBought}
+  const[txLog,setTxLog]=useState([]);
+  const[navHistory,setNavHistory]=useState([{t:Date.now(),nav:100000}]);
+  const[ticker,setTicker]=useState("");
+  const[qty,setQty]=useState(10);
+  const[loading,setLoading]=useState(false);
+  const[lastMsg,setLastMsg]=useState("");
+  const[tab,setPTab]=useState("positions"); // positions, performance, history
+
+  // Persist to localStorage
+  useEffect(()=>{try{const s=localStorage.getItem("qx_paper");if(s){const d=JSON.parse(s);setCash(d.cash||100000);setPositions(d.positions||{});setTxLog(d.txLog||[]);setNavHistory(d.navHistory||[{t:Date.now(),nav:100000}]);}}catch(e){}},[]);
+  useEffect(()=>{try{localStorage.setItem("qx_paper",JSON.stringify({cash,positions,txLog,navHistory}));}catch(e){}},[cash,positions,txLog,navHistory]);
+
+  const getPrice=(tk)=>{const a=ASSETS.find(x=>x.id===tk);return a?a.ret>0?Math.round(100+a.ret*2):Math.round(80+Math.random()*40):null;};
+
+  const executeTrade=async(side)=>{
+    const tk=ticker.toUpperCase().trim();if(!tk||qty<1)return;
+    setLoading(true);setLastMsg("");
+
+    let price=null;
+    // Try backend first
+    if(backendOk){
+      try{
+        const r=await apiFetch("/api/paper/trade",{ticker:tk,side,quantity:qty});
+        if(r.status==="filled"){
+          setLastMsg((side==="buy"?"Bought ":"Sold ")+r.quantity+" "+r.ticker+" @ $"+r.price.toFixed(2));
+          // Refresh from backend
+          try{
+            const sum=await fetch(BACKEND_URL+"/api/paper/summary").then(r=>r.json());
+            setCash(sum.cash);
+          }catch(e){}
+          try{
+            const pos=await fetch(BACKEND_URL+"/api/paper/positions").then(r=>r.json());
+            const p={};pos.forEach(x=>{p[x.ticker]={shares:x.shares,avgCost:x.avg_cost,price:x.current_price,pnl:x.unrealized_pnl,pnlPct:x.unrealized_pnl_pct,weight:x.weight};});
+            setPositions(p);
+          }catch(e){}
+          setTxLog(prev=>[{id:r.id,t:new Date().toLocaleTimeString(),tk:r.ticker,side,qty:r.quantity,price:r.price,total:r.total,status:"filled"},...prev].slice(0,100));
+          setLoading(false);return;
+        }else{
+          setLastMsg("Rejected: "+r.reason);setLoading(false);return;
+        }
+      }catch(e){/* fall through to local */}
+    }
+
+    // Local execution
+    price=getPrice(tk);
+    if(!price){
+      // Try to find in ASSETS by partial match
+      const match=ASSETS.find(a=>a.id.startsWith(tk));
+      if(match)price=Math.round(100+match.ret*1.5);
+    }
+    if(!price){price=Math.round(50+Math.random()*200);} // fallback random for unknown tickers
+
+    if(side==="buy"){
+      const total=price*qty;
+      if(total>cash){setLastMsg("Insufficient cash. Need $"+total.toLocaleString()+", have $"+cash.toLocaleString());setLoading(false);return;}
+      setCash(c=>c-total);
+      setPositions(prev=>{
+        const p={...prev};
+        if(p[tk]){
+          const oldShares=p[tk].shares;const oldCost=p[tk].avgCost;
+          p[tk]={...p[tk],shares:oldShares+qty,avgCost:(oldShares*oldCost+qty*price)/(oldShares+qty),price};
+        }else{
+          p[tk]={shares:qty,avgCost:price,price,pnl:0,pnlPct:0,weight:0,firstBought:new Date().toISOString()};
+        }
+        return p;
+      });
+      setLastMsg("Bought "+qty+" "+tk+" @ $"+price.toFixed(2)+" = $"+(qty*price).toLocaleString());
+    }else{
+      if(!positions[tk]||positions[tk].shares<qty){setLastMsg("Insufficient shares in "+tk);setLoading(false);return;}
+      const total=price*qty;
+      const realized=(price-positions[tk].avgCost)*qty;
+      setCash(c=>c+total);
+      setPositions(prev=>{
+        const p={...prev};
+        p[tk]={...p[tk],shares:p[tk].shares-qty,price};
+        if(p[tk].shares<=0)delete p[tk];
+        return p;
+      });
+      setLastMsg("Sold "+qty+" "+tk+" @ $"+price.toFixed(2)+" (P&L: "+(realized>=0?"+":"")+realized.toFixed(2)+")");
+    }
+    setTxLog(prev=>[{id:Math.random().toString(36).slice(2,8),t:new Date().toLocaleTimeString(),tk,side,qty,price,total:price*qty,status:"filled"},...prev].slice(0,100));
+    // Record NAV
+    const posVal=Object.entries(positions).reduce((a,[k,v])=>a+v.shares*(v.price||v.avgCost),0);
+    setNavHistory(prev=>[...prev,{t:Date.now(),nav:cash+posVal}].slice(-500));
+    setLoading(false);
+  };
+
+  // Compute totals
+  const posVal=Object.entries(positions).reduce((a,[k,v])=>a+v.shares*(v.price||v.avgCost),0);
+  const nav=cash+posVal;
+  const totalReturn=nav-100000;
+  const totalReturnPct=(nav/100000-1)*100;
+  const totalUnrealized=Object.values(positions).reduce((a,v)=>a+(v.price-v.avgCost)*v.shares,0);
+  const posCount=Object.keys(positions).length;
+
+  // Performance stats
+  const navs=navHistory.map(h=>h.nav);
+  const dailyRets=[];for(let i=1;i<navs.length;i++)if(navs[i-1]>0)dailyRets.push(navs[i]/navs[i-1]-1);
+  const avgRet=dailyRets.length>0?dailyRets.reduce((a,b)=>a+b,0)/dailyRets.length:0;
+  const stdRet=dailyRets.length>1?Math.sqrt(dailyRets.reduce((a,r)=>a+(r-avgRet)**2,0)/(dailyRets.length-1)):0;
+  const sharpe=stdRet>0?(avgRet-0.043/252)/stdRet*Math.sqrt(252):0;
+  let peak=100000,maxDD=0;navs.forEach(n=>{if(n>peak)peak=n;const dd=(n-peak)/peak;if(dd<maxDD)maxDD=dd;});
+  const winTrades=txLog.filter(t=>t.side==="sell"&&t.status==="filled").length;
+  const totalTrades=txLog.filter(t=>t.status==="filled").length;
+
+  const resetAccount=()=>{if(!confirm("Reset paper trading account to $100,000?"))return;setCash(100000);setPositions({});setTxLog([]);setNavHistory([{t:Date.now(),nav:100000}]);setLastMsg("Account reset to $100,000");};
+
+  // NAV chart
+  const chartW=500,chartH=120,pad=30;
+  const navPts=navHistory.slice(-100);
+  const navMin=Math.min(...navPts.map(h=>h.nav))*0.998;
+  const navMax=Math.max(...navPts.map(h=>h.nav))*1.002;
+  const cx=i=>pad+i/(navPts.length-1||1)*(chartW-pad*2);
+  const cy=v=>chartH-pad-(v-navMin)/(navMax-navMin||1)*(chartH-pad*2);
+
+  return e("div",{className:"pt-layout"},
+    // Left: Trade Ticket + Account
+    e("div",null,
+      e("div",{className:"card"},
+        e("div",{className:"card-title"},"TRADE TICKET"),
+        e("div",{className:"deriv-input"},e("div",{className:"deriv-lbl"},"TICKER"),e("input",{className:"pt-ticker",value:ticker,onChange:ev=>setTicker(ev.target.value),placeholder:"AAPL",maxLength:6})),
+        e("div",{className:"deriv-input"},e("div",{className:"deriv-lbl"},"QUANTITY"),e("input",{className:"pt-qty",type:"number",value:qty,onChange:ev=>setQty(Math.max(1,+ev.target.value)),min:1})),
+        e("div",{style:{display:"flex",gap:6,marginTop:8}},
+          e("button",{className:"pt-buy",onClick:()=>executeTrade("buy"),disabled:loading||!ticker.trim()},"BUY"),
+          e("button",{className:"pt-sell",onClick:()=>executeTrade("sell"),disabled:loading||!ticker.trim()},"SELL")
+        ),
+        lastMsg&&e("div",{style:{marginTop:8,fontSize:10,padding:"6px 8px",background:lastMsg.includes("Bought")||lastMsg.includes("Sold")&&!lastMsg.includes("Insufficient")?"#0d2818":"#1c0a00",borderRadius:5,color:lastMsg.includes("Insufficient")||lastMsg.includes("Rejected")?"#fcd34d":"#6ee7b7"}},lastMsg),
+        loading&&e("div",{style:{marginTop:6,fontSize:10,color:"#818cf8"}},e("span",{className:"spin"},"◌")," Executing...")
+      ),
+      e("div",{className:"card"},
+        e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+          e("div",{className:"card-title",style:{marginBottom:0}},"ACCOUNT"),
+          e("button",{className:"btn btn-xs",onClick:resetAccount,style:{color:"#475569",fontSize:8}},"↺ RESET")
+        ),
+        e("div",{className:"pt-nav",style:{color:totalReturn>=0?"#1D9E75":"#ef4444",marginTop:6}},"$"+nav.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})),
+        e("div",{style:{fontSize:11,color:totalReturn>=0?"#1D9E75":"#ef4444",marginBottom:8}},(totalReturn>=0?"+":"")+totalReturn.toFixed(2)+" ("+(totalReturnPct>=0?"+":"")+totalReturnPct.toFixed(2)+"%)"),
+        [["Cash","$"+cash.toLocaleString(undefined,{minimumFractionDigits:2})],["Invested","$"+posVal.toLocaleString(undefined,{minimumFractionDigits:2})],["Positions",posCount],["Unrealized",(totalUnrealized>=0?"+$":"-$")+Math.abs(totalUnrealized).toFixed(2)],["Trades",totalTrades]].map(([l,v])=>
+          e("div",{key:l,style:{display:"flex",justifyContent:"space-between",fontSize:10,padding:"3px 0",borderBottom:"1px solid #0a0f1c"}},e("span",{style:{color:"#475569"}},l),e("span",{style:{fontWeight:"bold"}},v))
+        ),
+        // Mini NAV chart
+        navPts.length>2&&e("div",{style:{marginTop:8}},
+          e("svg",{width:"100%",viewBox:"0 0 "+chartW+" "+chartH,style:{display:"block"}},
+            e("line",{x1:pad,y1:cy(100000),x2:chartW-pad,y2:cy(100000),stroke:"#1a2540",strokeWidth:".5",strokeDasharray:"3,3"}),
+            e("polyline",{points:navPts.map((h,i)=>cx(i)+","+cy(h.nav)).join(" "),fill:"none",stroke:nav>=100000?"#1D9E75":"#ef4444",strokeWidth:"1.5"}),
+            e("text",{x:chartW-pad,y:cy(100000)-4,textAnchor:"end",fontSize:7,fill:"#334155"},"$100K start")
+          )
+        )
+      ),
+      e("div",{className:"card"},
+        e("div",{className:"card-title"},"PERFORMANCE",e("span",{className:"cfa-tag",style:{marginLeft:6}},"CFA L1")),
+        [["Sharpe Ratio",sharpe.toFixed(3),sharpe>=1?"up":sharpe>=0.5?"wa":"dn"],
+         ["Max Drawdown",(maxDD*100).toFixed(2)+"%","dn"],
+         ["Win Rate",totalTrades>0?(winTrades/totalTrades*100).toFixed(0)+"%":"—",""],
+         ["Total Trades",totalTrades,""],
+        ].map(([l,v,cls])=>e("div",{key:l,style:{display:"flex",justifyContent:"space-between",fontSize:10,padding:"3px 0",borderBottom:"1px solid #0a0f1c"}},e("span",{style:{color:"#475569"}},l),e("span",{className:cls,style:{fontWeight:"bold"}},v)))
+      )
+    ),
+
+    // Right: Positions + History
+    e("div",null,
+      e("div",{style:{display:"flex",gap:4,marginBottom:8}},
+        ["positions","history"].map(t=>e("button",{key:t,className:"btn btn-xs"+(tab===t?" btn-p":""),onClick:()=>setPTab(t),style:{textTransform:"capitalize"}},t))
+      ),
+
+      tab==="positions"&&e("div",{className:"card"},
+        e("div",{className:"card-title"},"POSITIONS ("+posCount+")"),
+        posCount===0?e("div",{style:{color:"#475569",fontSize:11,padding:16,textAlign:"center"}},"No positions yet. Enter a ticker and click BUY to start."):
+        e("div",{style:{overflowX:"auto"}},
+          e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11}},
+            e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540"}},
+              ["TICKER","SHARES","AVG COST","PRICE","MKT VALUE","P&L","P&L %","WT %"].map(h=>e("th",{key:h,style:{padding:"4px 6px",textAlign:"left",fontSize:9,color:"#334155",fontWeight:"bold"}},h))
+            )),
+            e("tbody",null,Object.entries(positions).sort((a,b)=>b[1].shares*(b[1].price||b[1].avgCost)-a[1].shares*(a[1].price||a[1].avgCost)).map(([tk,pos])=>{
+              const mv=pos.shares*(pos.price||pos.avgCost);
+              const pnl=(pos.price-pos.avgCost)*pos.shares;
+              const pnlPct=pos.avgCost>0?((pos.price||pos.avgCost)/pos.avgCost-1)*100:0;
+              const wt=nav>0?mv/nav*100:0;
+              return e("tr",{key:tk,style:{borderBottom:"1px solid #06090f"}},
+                e("td",{style:{padding:"5px 6px",fontWeight:"bold",color:"#818cf8"}},tk),
+                e("td",{style:{padding:"5px 6px"}},pos.shares),
+                e("td",{style:{padding:"5px 6px"}},"$"+pos.avgCost.toFixed(2)),
+                e("td",{style:{padding:"5px 6px"}},"$"+(pos.price||pos.avgCost).toFixed(2)),
+                e("td",{style:{padding:"5px 6px",fontWeight:"bold"}},"$"+mv.toFixed(0)),
+                e("td",{style:{padding:"5px 6px",color:pnl>=0?"#1D9E75":"#ef4444",fontWeight:"bold"}},(pnl>=0?"+":"")+pnl.toFixed(2)),
+                e("td",{style:{padding:"5px 6px",color:pnlPct>=0?"#1D9E75":"#ef4444"}},(pnlPct>=0?"+":"")+pnlPct.toFixed(1)+"%"),
+                e("td",{style:{padding:"5px 6px"}},wt.toFixed(1)+"%")
+              );
+            }))
+          )
+        ),
+        posCount>0&&e("div",{className:"info-box",style:{marginTop:8}},"Portfolio: "+posCount+" positions · $"+posVal.toFixed(0)+" invested · $"+cash.toFixed(0)+" cash ("+(cash/nav*100).toFixed(0)+"% cash)")
+      ),
+
+      tab==="history"&&e("div",{className:"card"},
+        e("div",{className:"card-title"},"TRANSACTION LOG ("+txLog.length+")"),
+        txLog.length===0?e("div",{style:{color:"#475569",fontSize:11,padding:16,textAlign:"center"}},"No trades yet."):
+        e("div",{style:{maxHeight:400,overflowY:"auto"}},
+          txLog.map(tx=>e("div",{key:tx.id,className:"pt-tx"},
+            e("div",{style:{display:"flex",alignItems:"center",gap:6}},
+              e("span",{className:"act-badge "+(tx.side==="buy"?"act-buy":"act-sell"),style:{fontSize:9}},tx.side.toUpperCase()),
+              e("span",{style:{fontWeight:"bold",color:"#818cf8"}},tx.tk),
+              e("span",null,tx.qty+" shares @ $"+tx.price.toFixed(2))
+            ),
+            e("div",{style:{display:"flex",alignItems:"center",gap:8}},
+              e("span",{style:{fontWeight:"bold"}},"$"+tx.total.toFixed(0)),
+              e("span",{style:{color:"#334155",fontSize:9}},tx.t)
+            )
+          ))
+        )
+      ),
+
+      // CFA concepts
+      e("div",{className:"card"},
+        e("div",{className:"card-title"},"CFA EXAM CONCEPTS IN PLAY",e("span",{className:"cfa-tag",style:{marginLeft:6}},"L1-L3")),
+        e("div",{style:{fontSize:10,color:"#94a3b8",lineHeight:1.8}},
+          "This paper trading account tracks concepts tested across CFA Levels I-III:",
+          e("div",{style:{marginTop:6}},
+            [["TWR vs MWR","L1","Time-weighted return measures strategy skill. Money-weighted measures your actual experience including timing."],
+             ["Sharpe Ratio","L1","Your portfolio's excess return per unit of risk. Computed from your actual daily NAV changes."],
+             ["Max Drawdown","L1","The worst peak-to-trough decline. Your pain tolerance in real numbers."],
+             ["VWAC Cost Basis","L1","Volume-weighted average cost. Each buy updates this — critical for tax lot accounting."],
+             ["Position Sizing","L3","Your weight per position reflects concentration risk. >10% in one stock = concentrated."],
+             ["Realized vs Unrealized","L1","Selling crystallizes gains/losses. Unrealized P&L is mark-to-market, not yet taxable."],
+            ].map(([concept,level,desc])=>e("div",{key:concept,style:{padding:"4px 0",borderBottom:"1px solid #0a0f1c"}},
+              e("span",{style:{fontWeight:"bold",color:"#f1f5f9"}},concept),e("span",{className:"cfa-tag",style:{marginLeft:4}},level),
+              e("div",{style:{color:"#64748b",marginTop:2}},desc)
+            ))
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── Derivatives Sandbox ───────────────────────────────────────────────────────
+// Client-side BSM for instant feedback; backend for IV surface
+function _normcdf(x){const a1=0.254829592,a2=-0.284496736,a3=1.421413741,a4=-1.453152027,a5=1.061405429,p=0.3275911;const s=x<0?-1:1;x=Math.abs(x)/Math.sqrt(2);const t=1/(1+p*x);const y=1-((((a5*t+a4)*t+a3)*t+a2)*t+a1)*t*Math.exp(-x*x);return 0.5*(1+s*y);}
+function _normpdf(x){return Math.exp(-0.5*x*x)/Math.sqrt(2*Math.PI);}
+function _bsm(S,K,T,r,sig,type){
+  if(T<=0||sig<=0)return{price:Math.max(type==="call"?S-K:K-S,0),delta:type==="call"?1:-1,gamma:0,theta:0,vega:0,rho:0,pitm:type==="call"?(S>K?100:0):(K>S?100:0)};
+  const d1=(Math.log(S/K)+(r+0.5*sig*sig)*T)/(sig*Math.sqrt(T));
+  const d2=d1-sig*Math.sqrt(T);
+  let price,delta,pitm;
+  if(type==="call"){price=S*_normcdf(d1)-K*Math.exp(-r*T)*_normcdf(d2);delta=_normcdf(d1);pitm=_normcdf(d2)*100;}
+  else{price=K*Math.exp(-r*T)*_normcdf(-d2)-S*_normcdf(-d1);delta=_normcdf(d1)-1;pitm=_normcdf(-d2)*100;}
+  const gamma=_normpdf(d1)/(S*sig*Math.sqrt(T));
+  const theta=-(S*_normpdf(d1)*sig)/(2*Math.sqrt(T))/365;
+  const vega=S*_normpdf(d1)*Math.sqrt(T)/100;
+  const rho=type==="call"?K*T*Math.exp(-r*T)*_normcdf(d2)/100:-K*T*Math.exp(-r*T)*_normcdf(-d2)/100;
+  return{price,delta,gamma,theta,vega,rho,pitm};
+}
+
+function DerivativesSandbox({backendOk}){
+  // Option pricer state
+  const[spot,setSpot]=useState(250);
+  const[strike,setStrike]=useState(260);
+  const[tte,setTte]=useState(0.25);
+  const[vol,setVol]=useState(0.30);
+  const[rate,setRate]=useState(0.043);
+  const[optType,setOptType]=useState("call");
+  const[ticker,setTicker]=useState("AAPL");
+  const[fetchingPrice,setFetchingPrice]=useState(false);
+
+  // Strategy state
+  const[strat,setStrat]=useState("covered_call");
+  const STRATS=[
+    {id:"covered_call",l:"Covered Call",desc:"Own stock + sell call. Income strategy, caps upside."},
+    {id:"protective_put",l:"Protective Put",desc:"Own stock + buy put. Portfolio insurance."},
+    {id:"collar",l:"Collar",desc:"Own stock + buy put + sell call. Zero-cost hedge."},
+    {id:"bull_call_spread",l:"Bull Call Spread",desc:"Buy lower call + sell higher call. Defined-risk bullish."},
+    {id:"bear_put_spread",l:"Bear Put Spread",desc:"Buy higher put + sell lower put. Defined-risk bearish."},
+    {id:"straddle",l:"Straddle",desc:"Buy call + put at same strike. Bet on big move, any direction."},
+    {id:"strangle",l:"Strangle",desc:"Buy OTM call + OTM put. Cheaper vol bet, wider breakevens."},
+  ];
+
+  // Compute option price locally
+  const opt=useMemo(()=>_bsm(spot,strike,tte,rate,vol,optType),[spot,strike,tte,rate,vol,optType]);
+  const intrinsic=optType==="call"?Math.max(spot-strike,0):Math.max(strike-spot,0);
+
+  // Compute strategy payoff locally
+  const payoff=useMemo(()=>{
+    const prices=[];for(let p=spot*0.7;p<=spot*1.3;p+=spot*0.006)prices.push(p);
+    const callK=Math.round(spot*1.05*100)/100;
+    const putK=Math.round(spot*0.95*100)/100;
+    const c=_bsm(spot,callK,tte,rate,vol,"call");
+    const p2=_bsm(spot,putK,tte,rate,vol,"put");
+    const atm=_bsm(spot,spot,tte,rate,vol,"call");
+    const atmP=_bsm(spot,spot,tte,rate,vol,"put");
+
+    let curve,maxP,maxL,be,desc,legs;
+    if(strat==="covered_call"){
+      curve=prices.map(p=>(Math.min(p,callK)-spot)*100+c.price*100);
+      maxP=(callK-spot)*100+c.price*100;maxL=-(spot-c.price)*100;be=[spot-c.price];
+      desc="Sell a "+callK+" call for $"+c.price.toFixed(2)+"/share. You collect premium but cap upside at $"+callK+".";
+      legs=[{t:"Stock",s:"Long",k:"-",prem:spot.toFixed(2)},{t:"Call",s:"Short",k:callK,prem:c.price.toFixed(2)}];
+    }else if(strat==="protective_put"){
+      curve=prices.map(p=>(Math.max(p,putK)-spot)*100-p2.price*100);
+      maxP=999999;maxL=-(spot-putK+p2.price)*100;be=[spot+p2.price];
+      desc="Buy a "+putK+" put for $"+p2.price.toFixed(2)+"/share. Floor your losses at $"+putK+" but pay premium.";
+      legs=[{t:"Stock",s:"Long",k:"-",prem:spot.toFixed(2)},{t:"Put",s:"Long",k:putK,prem:p2.price.toFixed(2)}];
+    }else if(strat==="collar"){
+      const net=c.price-p2.price;
+      curve=prices.map(p=>(Math.min(Math.max(p,putK),callK)-spot)*100+net*100);
+      maxP=(callK-spot+net)*100;maxL=-(spot-putK-net)*100;be=[spot-net];
+      desc="Buy "+putK+" put ($"+p2.price.toFixed(2)+"), sell "+callK+" call ($"+c.price.toFixed(2)+"). Net cost: $"+(p2.price-c.price).toFixed(2)+"/share.";
+      legs=[{t:"Stock",s:"Long",k:"-",prem:spot.toFixed(2)},{t:"Put",s:"Long",k:putK,prem:p2.price.toFixed(2)},{t:"Call",s:"Short",k:callK,prem:c.price.toFixed(2)}];
+    }else if(strat==="bull_call_spread"){
+      const lc=_bsm(spot,putK,tte,rate,vol,"call");const sc=_bsm(spot,callK,tte,rate,vol,"call");const nd=lc.price-sc.price;
+      curve=prices.map(p=>(Math.min(Math.max(p-putK,0),callK-putK)-nd)*100);
+      maxP=(callK-putK-nd)*100;maxL=-nd*100;be=[putK+nd];
+      desc="Buy "+putK+" call ($"+lc.price.toFixed(2)+"), sell "+callK+" call ($"+sc.price.toFixed(2)+"). Net debit: $"+nd.toFixed(2)+"/share.";
+      legs=[{t:"Call",s:"Long",k:putK,prem:lc.price.toFixed(2)},{t:"Call",s:"Short",k:callK,prem:sc.price.toFixed(2)}];
+    }else if(strat==="bear_put_spread"){
+      const lp=_bsm(spot,callK,tte,rate,vol,"put");const sp=_bsm(spot,putK,tte,rate,vol,"put");const nd=lp.price-sp.price;
+      curve=prices.map(p=>(Math.min(Math.max(callK-p,0),callK-putK)-nd)*100);
+      maxP=(callK-putK-nd)*100;maxL=-nd*100;be=[callK-nd];
+      desc="Buy "+callK+" put ($"+lp.price.toFixed(2)+"), sell "+putK+" put ($"+sp.price.toFixed(2)+"). Net debit: $"+nd.toFixed(2)+"/share.";
+      legs=[{t:"Put",s:"Long",k:callK,prem:lp.price.toFixed(2)},{t:"Put",s:"Short",k:putK,prem:sp.price.toFixed(2)}];
+    }else if(strat==="straddle"){
+      const tp=atm.price+atmP.price;
+      curve=prices.map(p=>(Math.max(p-spot,0)+Math.max(spot-p,0)-tp)*100);
+      maxP=999999;maxL=-tp*100;be=[spot-tp,spot+tp];
+      desc="Buy ATM call ($"+atm.price.toFixed(2)+") + ATM put ($"+atmP.price.toFixed(2)+"). Total cost: $"+tp.toFixed(2)+"/share. Profit if stock moves more than $"+tp.toFixed(2)+" in either direction.";
+      legs=[{t:"Call",s:"Long",k:spot,prem:atm.price.toFixed(2)},{t:"Put",s:"Long",k:spot,prem:atmP.price.toFixed(2)}];
+    }else{
+      const tp=c.price+p2.price;
+      curve=prices.map(p=>(Math.max(p-callK,0)+Math.max(putK-p,0)-tp)*100);
+      maxP=999999;maxL=-tp*100;be=[putK-tp,callK+tp];
+      desc="Buy "+callK+" call ($"+c.price.toFixed(2)+") + "+putK+" put ($"+p2.price.toFixed(2)+"). Total cost: $"+tp.toFixed(2)+"/share.";
+      legs=[{t:"Call",s:"Long",k:callK,prem:c.price.toFixed(2)},{t:"Put",s:"Long",k:putK,prem:p2.price.toFixed(2)}];
+    }
+    return{prices,curve,maxP,maxL,be,desc,legs};
+  },[spot,strike,tte,rate,vol,strat]);
+
+  // Fetch live price for ticker
+  const fetchSpot=async()=>{
+    if(!ticker)return;setFetchingPrice(true);
+    try{
+      if(backendOk){
+        const r=await apiFetch("/api/derivatives/price",{spot:100,strike:100,tte:0.25,volatility:0.3,option_type:"call"});
+        // Just testing backend - use yfinance via a dedicated endpoint would be better
+      }
+      // For now, use the ASSETS data if available
+      const a=ASSETS.find(x=>x.id===ticker.toUpperCase());
+      if(a&&a.mktCap){/* we don't have live price in ASSETS easily */}
+    }catch(e){}
+    setFetchingPrice(false);
+  };
+
+  // Payoff SVG chart
+  const chartW=500,chartH=200,pad=40;
+  const minP=payoff.prices[0],maxPr=payoff.prices[payoff.prices.length-1];
+  const minY=Math.min(...payoff.curve,-100),maxY=Math.max(...payoff.curve,100);
+  const px=v=>pad+(v-minP)/(maxPr-minP)*(chartW-pad*2);
+  const py=v=>chartH-pad-(v-minY)/(maxY-minY||1)*(chartH-pad*2);
+
+  return e("div",null,
+    e("div",{className:"deriv-grid"},
+      // Left panel: Option Pricer
+      e("div",null,
+        e("div",{className:"card"},
+          e("div",{className:"card-title"},"OPTION PRICER",e("span",{className:"cfa-tag",style:{marginLeft:6}},"CFA L2")),
+          e("div",{style:{display:"flex",gap:4,marginBottom:8}},
+            e("button",{className:"btn btn-xs"+(optType==="call"?" btn-s":""),onClick:()=>setOptType("call")},"CALL"),
+            e("button",{className:"btn btn-xs"+(optType==="put"?" btn-s":""),onClick:()=>setOptType("put")},"PUT")
+          ),
+          [["SPOT PRICE","spot",spot,setSpot,1,5000],["STRIKE","strike",strike,setStrike,1,5000],["TIME (years)","tte",tte,setTte,0.01,5],["VOLATILITY","vol",(vol*100).toFixed(0)+"%",null,null,null],["RISK-FREE RATE","rate",(rate*100).toFixed(1)+"%",null,null,null]].map(([lbl,key,val,setter,mn,mx])=>
+            e("div",{key,className:"deriv-input"},
+              e("div",{className:"deriv-lbl"},lbl),
+              setter?e("input",{className:"deriv-field",type:"number",value:val,onChange:ev=>setter(+ev.target.value),min:mn,max:mx,step:key==="tte"?0.01:1}):
+              e("div",{style:{fontSize:12,fontWeight:"bold",color:"#cbd5e1",padding:"4px 0"}},val)
+            )
+          ),
+          e("div",{className:"deriv-input"},
+            e("div",{className:"deriv-lbl"},"VOLATILITY"),
+            e("input",{type:"range",min:5,max:100,value:Math.round(vol*100),onChange:ev=>setVol(ev.target.value/100),style:{width:"100%",accentColor:"#6366f1"}}),
+          ),
+          e("div",{style:{fontSize:18,fontWeight:"bold",color:optType==="call"?"#1D9E75":"#ef4444",textAlign:"center",margin:"10px 0"}},"$"+opt.price.toFixed(2),
+            e("div",{style:{fontSize:10,color:"#475569",fontWeight:"normal"}},"Intrinsic $"+intrinsic.toFixed(2)+" + Time $"+(opt.price-intrinsic).toFixed(2))
+          ),
+          e("div",{style:{fontSize:10,color:"#475569",textAlign:"center"}},"P(ITM): "+opt.pitm.toFixed(1)+"% · P(OTM): "+(100-opt.pitm).toFixed(1)+"%")
+        ),
+        e("div",{className:"card"},
+          e("div",{className:"card-title"},"THE GREEKS",e("span",{className:"cfa-tag",style:{marginLeft:6}},"CFA L2")),
+          e("div",{className:"greek-grid"},
+            [["Δ",opt.delta.toFixed(3),"Delta","Price sensitivity"],["Γ",opt.gamma.toFixed(5),"Gamma","Delta sensitivity"],["Θ",opt.theta.toFixed(3),"Theta","Daily decay"],["V","$"+(opt.vega).toFixed(3),"Vega","Vol sensitivity"],["ρ",opt.rho.toFixed(3),"Rho","Rate sensitivity"]].map(([sym,val,name,tip])=>
+              e("div",{key:name,className:"greek-box",title:tip},e("div",{className:"greek-sym"},sym),e("div",{className:"greek-val"},val),e("div",{className:"greek-name"},name))
+            )
+          )
+        )
+      ),
+      // Right panel: Strategy Sandbox
+      e("div",null,
+        e("div",{className:"card"},
+          e("div",{className:"card-title"},"STRATEGY SANDBOX",e("span",{className:"cfa-tag",style:{marginLeft:6}},"CFA L3")),
+          e("div",{style:{display:"flex",flexWrap:"wrap",gap:4,marginBottom:10}},
+            STRATS.map(s=>e("button",{key:s.id,className:"strat-btn"+(strat===s.id?" active":""),onClick:()=>setStrat(s.id),title:s.desc},s.l))
+          ),
+          e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.6,marginBottom:10,padding:"8px 10px",background:"#06090f",borderRadius:6}},payoff.desc),
+          // Payoff chart
+          e("div",{style:{overflowX:"auto"}},
+            e("svg",{width:"100%",viewBox:"0 0 "+chartW+" "+chartH,style:{display:"block"}},
+              // Zero line
+              e("line",{x1:pad,y1:py(0),x2:chartW-pad,y2:py(0),stroke:"#1a2540",strokeWidth:"1",strokeDasharray:"4,4"}),
+              // Axes
+              e("line",{x1:pad,y1:pad,x2:pad,y2:chartH-pad,stroke:"#1a2540",strokeWidth:".5"}),
+              e("line",{x1:pad,y1:chartH-pad,x2:chartW-pad,y2:chartH-pad,stroke:"#1a2540",strokeWidth:".5"}),
+              // Spot price vertical
+              e("line",{x1:px(spot),y1:pad,x2:px(spot),y2:chartH-pad,stroke:"#818cf8",strokeWidth:"1",strokeDasharray:"3,3"}),
+              e("text",{x:px(spot),y:pad-4,textAnchor:"middle",fontSize:8,fill:"#818cf8"},"Spot $"+spot),
+              // Payoff curve
+              e("polyline",{points:payoff.prices.map((p,i)=>px(p)+","+py(payoff.curve[i])).join(" "),fill:"none",stroke:payoff.curve[payoff.curve.length-1]>0?"#1D9E75":"#ef4444",strokeWidth:"2"}),
+              // Fill profit area
+              e("polygon",{points:[...payoff.prices.map((p,i)=>payoff.curve[i]>0?px(p)+","+py(payoff.curve[i]):"").filter(Boolean),px(payoff.prices[payoff.prices.length-1])+","+py(0),px(payoff.prices[0])+","+py(0)].join(" "),fill:"rgba(29,158,117,0.08)"}),
+              // Breakeven markers
+              ...payoff.be.map((b,i)=>e("circle",{key:i,cx:px(b),cy:py(0),r:4,fill:"#f59e0b",stroke:"#05080f",strokeWidth:"1"})),
+              ...payoff.be.map((b,i)=>e("text",{key:"t"+i,x:px(b),y:py(0)+14,textAnchor:"middle",fontSize:8,fill:"#f59e0b"},"BE $"+b.toFixed(0))),
+              // Labels
+              e("text",{x:chartW/2,y:chartH-4,textAnchor:"middle",fontSize:8,fill:"#475569"},"Underlying Price at Expiration"),
+              e("text",{x:8,y:chartH/2,textAnchor:"middle",fontSize:8,fill:"#475569",transform:"rotate(-90 8 "+(chartH/2)+")"},"P&L ($)")
+            )
+          ),
+          // Strategy legs table
+          e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:10,marginTop:8}},
+            e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540"}},
+              ["LEG","SIDE","STRIKE","PREMIUM"].map(h=>e("th",{key:h,style:{padding:"3px 6px",textAlign:"left",fontSize:9,color:"#334155"}},h))
+            )),
+            e("tbody",null,payoff.legs.map((lg,i)=>
+              e("tr",{key:i,style:{borderBottom:"1px solid #06090f"}},
+                e("td",{style:{padding:"3px 6px",color:"#818cf8",fontWeight:"bold"}},lg.t),
+                e("td",{style:{padding:"3px 6px",color:lg.s==="Long"?"#1D9E75":"#ef4444"}},lg.s),
+                e("td",{style:{padding:"3px 6px"}},lg.k),
+                e("td",{style:{padding:"3px 6px"}},"$"+lg.prem)
+              )
+            ))
+          )
+        ),
+        // Stats row
+        e("div",{className:"two-col"},
+          e("div",{className:"card"},
+            e("div",{className:"card-title"},"RISK / REWARD"),
+            [["Max Profit",payoff.maxP>=999999?"Unlimited":"$"+payoff.maxP.toFixed(0),payoff.maxP>0],
+             ["Max Loss","$"+payoff.maxL.toFixed(0),false],
+             ["Breakeven",payoff.be.map(b=>"$"+b.toFixed(2)).join(" / "),""],
+             ["Risk/Reward",payoff.maxP>=999999?"∞":(Math.abs(payoff.maxP/payoff.maxL)||0).toFixed(2)+"x",""],
+            ].map(([l,v,pos])=>e("div",{key:l,className:"payoff-stat"},e("span",{className:"data-key"},l),e("span",{className:"data-val "+(pos===true?"up":pos===false?"dn":"")},v)))
+          ),
+          e("div",{className:"card"},
+            e("div",{className:"card-title"},"CFA EXAM CONCEPTS"),
+            e("div",{style:{fontSize:10,color:"#94a3b8",lineHeight:1.8}},
+              strat==="covered_call"?"Covered call = long stock + short call. Max profit when stock closes at strike. You sacrifice upside for income (theta collection). Tested on CFA L3 — know the payoff diagram shape and when to use it.":
+              strat==="protective_put"?"Protective put = long stock + long put. Floor on losses, unlimited upside. Cost is the put premium (theta drag). Think of it as portfolio insurance. CFA L3 tests cost-benefit analysis.":
+              strat==="collar"?"Collar = long stock + long put + short call. The call premium funds the put. If net premium ≈ 0, it's a 'zero-cost collar.' Know: you give up upside beyond call strike. CFA L3 favorite.":
+              strat==="bull_call_spread"?"Bull call spread = long lower-strike call + short higher-strike call. Defined risk + defined reward. Net debit strategy. CFA L2/L3 tests: max profit = strike diff minus debit, max loss = debit paid.":
+              strat==="bear_put_spread"?"Bear put spread = long higher-strike put + short lower-strike put. Bearish defined-risk. Net debit. Mirror of bull call spread. Max profit = strike diff minus debit.":
+              strat==="straddle"?"Long straddle = long call + long put at same strike. Pure volatility bet — you profit if the stock moves MORE than the total premium in either direction. CFA tests: know that this is delta-neutral at entry.":
+              "Long strangle = long OTM call + long OTM put. Cheaper than straddle but needs a bigger move. Two breakevens. CFA tests: compare cost/breakevens to straddle."
+            )
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── Login Gate ────────────────────────────────────────────────────────────────
+function LoginGate({children}){
+  const[user,setUser]=useState(()=>{try{return JSON.parse(localStorage.getItem("qx_user"));}catch(e){return null;}});
+  const[name,setName]=useState("");
+  const[email,setEmail]=useState("");
+  const[pass,setPass]=useState("");
+  const[mode,setMode]=useState("login"); // login, signup, guest
+
+  const save=(u)=>{localStorage.setItem("qx_user",JSON.stringify(u));setUser(u);};
+
+  if(user)return typeof children==="function"?children(user,()=>{localStorage.removeItem("qx_user");setUser(null);}):children;
+
+  const submit=()=>{
+    if(mode==="signup"&&!name.trim())return;
+    if(!email.trim())return;
+    save({name:name.trim()||email.split("@")[0],email:email.trim(),joined:new Date().toISOString(),plan:"free"});
+  };
+  const guest=()=>save({name:"Guest",email:"guest@quantex.app",joined:new Date().toISOString(),plan:"guest"});
+
+  return e("div",{className:"login-wrap"},
+    e("div",{className:"login-card"},
+      e("div",{className:"login-logo"},"QUANTEX"),
+      e("div",{className:"login-sub"},"Portfolio Intelligence Platform",e("br",null),"CFA Exam Prep · Paper Trading · AI Advisory"),
+      mode==="signup"&&e("input",{className:"login-field",placeholder:"Full Name",value:name,onChange:ev=>setName(ev.target.value)}),
+      e("input",{className:"login-field",placeholder:"Email",type:"email",value:email,onChange:ev=>setEmail(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&submit()}),
+      e("input",{className:"login-field",placeholder:"Password",type:"password",value:pass,onChange:ev=>setPass(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&submit()}),
+      e("button",{className:"login-btn",onClick:submit},mode==="signup"?"Create Account":"Sign In"),
+      e("div",{style:{textAlign:"center",marginTop:10}},
+        e("button",{style:{background:"none",border:"none",color:"#6366f1",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"},onClick:()=>setMode(mode==="signup"?"login":"signup")},mode==="signup"?"Already have an account? Sign in":"Don't have an account? Sign up")
+      ),
+      e("div",{className:"login-divider"},"or"),
+      e("button",{style:{width:"100%",padding:11,background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.15)",borderRadius:10,color:"#a5b4fc",fontSize:12,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600},onClick:guest},"Continue as Guest"),
+      e("div",{style:{textAlign:"center",marginTop:14,fontSize:10,color:"#4a5568",lineHeight:1.6}},"Free tier · No credit card required",e("br",null),"Progress saves locally on this device")
+    )
+  );
+}
+
+// ── Factor Sliders ───────────────────────────────────────────────────────────
+function FactorSliders({weights,onChange,goal}){
+  const FACTORS=[
+    {id:"momentum",label:"Momentum",desc:"Recent price trend strength and consistency"},
+    {id:"quality",label:"Quality",desc:"Risk-adjusted return quality (Sharpe ratio)"},
+    {id:"value",label:"Value",desc:"Valuation relative to earnings and growth"},
+    {id:"low_vol",label:"Low Volatility",desc:"Preference for lower-risk assets"},
+    {id:"yield",label:"Dividend Yield",desc:"Income generation from dividends"},
+  ];
+  const total=Object.values(weights).reduce((a,b)=>a+b,0);
+  return e("div",{className:"factor-panel"},
+    e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}},
+      e("div",{className:"card-title",style:{margin:0}},"FACTOR WEIGHTS",e("span",{className:"cfa-tag",style:{marginLeft:6}},"Customize")),
+      e("div",{style:{fontSize:9,color:Math.abs(total-100)<1?"#34d399":"#f87171",fontWeight:700}},Math.round(total)+"%")
+    ),
+    FACTORS.map(f=>e("div",{key:f.id},
+      e("div",{className:"factor-row"},
+        e("div",{className:"factor-name"},f.label),
+        e("input",{className:"factor-slider",type:"range",min:0,max:50,value:Math.round((weights[f.id]||0)*100),onChange:ev=>{
+          const newW={...weights,[f.id]:ev.target.value/100};
+          const sum=Object.values(newW).reduce((a,b)=>a+b,0);
+          if(sum>0){const norm={};Object.keys(newW).forEach(k=>norm[k]=newW[k]/sum);onChange(norm);}
+        }}),
+        e("div",{className:"factor-pct"},Math.round((weights[f.id]||0)*100)+"%")
+      ),
+      e("div",{className:"factor-desc"},f.desc)
+    )),
+    e("button",{className:"btn btn-xs",style:{marginTop:4},onClick:()=>{
+      const defaults={Growth:{momentum:.35,quality:.25,value:.15,low_vol:.10,yield:.15},Income:{momentum:.10,quality:.20,value:.15,low_vol:.20,yield:.35},Preservation:{momentum:.10,quality:.25,value:.15,low_vol:.35,yield:.15},Balanced:{momentum:.20,quality:.25,value:.20,low_vol:.20,yield:.15}};
+      onChange(defaults[goal]||defaults.Balanced);
+    }},"↺ Reset to "+goal+" defaults")
+  );
+}
+
+// ── Course Hub ───────────────────────────────────────────────────────────────
+function CourseHub({profile,ports,activePort}){
+  const[activeMod,setActiveMod]=useState(0);
+  const[activeSection,setActiveSection]=useState("reading");
+  const[quizState,setQuizState]=useState({});
+  const[progress,setProgress]=useState(()=>{try{return JSON.parse(localStorage.getItem("qx_course")||"{}") }catch(e){return{};}});
+  useEffect(()=>{try{localStorage.setItem("qx_course",JSON.stringify(progress));}catch(e){}},[progress]);
+
+  const markRead=(modId,section)=>{
+    setProgress(prev=>{const p={...prev};if(!p[modId])p[modId]={};p[modId][section]=true;return p;});
+  };
+
+  const MODULES=[
+    {id:"tvm",level:"L1",title:"Time Value of Money",topic:"Quantitative Methods",
+     reading:{title:"Understanding Present and Future Value",content:"The Time Value of Money (TVM) is the foundational concept in all of finance. A dollar today is worth more than a dollar tomorrow because of its earning potential.\n\n<h3>Core Principles</h3>\n\nFuture Value (FV) tells you what an investment today will be worth later:\n<h4>FV = PV × (1 + r)^n</h4>\nWhere PV is present value, r is the interest rate per period, and n is the number of periods.\n\nPresent Value (PV) tells you what a future cash flow is worth today:\n<h4>PV = FV / (1 + r)^n</h4>\n\nThis is the basis of all discounted cash flow analysis. When you see a stock valued at $150 using DCF, someone computed the present value of all expected future cash flows.\n\n<h3>Compounding Frequency</h3>\n\nAnnual compounding: FV = PV × (1 + r)^n\nSemi-annual: FV = PV × (1 + r/2)^(2n)\nContinuous: FV = PV × e^(rn)\n\nMore frequent compounding produces higher effective rates. The Effective Annual Rate (EAR) converts any compounding frequency to an annual equivalent:\n<h4>EAR = (1 + r/m)^m − 1</h4>\n\n<h3>Application in Portfolio Management</h3>\n\nEvery metric in Quantex uses TVM implicitly. When we compute expected return, we're projecting future portfolio value. When we discount to find present value, we're answering: 'What is this future return stream worth paying for today?'"},
+     quiz:[
+       {q:"If you invest $10,000 at 8% annually for 5 years, what is the future value?",opts:["$14,693","$14,000","$15,000","$13,382"],correct:0,explain:"FV = 10,000 × (1.08)^5 = $14,693.28"},
+       {q:"What is the present value of $50,000 received in 10 years at a 6% discount rate?",opts:["$27,919","$30,000","$25,000","$32,500"],correct:0,explain:"PV = 50,000 / (1.06)^10 = $27,919.74"},
+       {q:"Which compounding frequency produces the highest effective annual rate for a stated 12% rate?",opts:["Annual","Quarterly","Monthly","Continuous"],correct:3,explain:"Continuous compounding: EAR = e^0.12 − 1 = 12.75%. More frequent compounding always produces a higher EAR."},
+       {q:"An investment doubles in value over 7 years. What is the approximate annual return?",opts:["10.3%","7.0%","14.3%","8.0%"],correct:0,explain:"Using the Rule of 72: 72/7 ≈ 10.3%. Exact: (2)^(1/7) − 1 = 10.41%."},
+     ]},
+    {id:"risk_return",level:"L1",title:"Risk and Return",topic:"Portfolio Management",
+     reading:{title:"Understanding Portfolio Risk and Return",content:"<h3>Expected Return</h3>\n\nPortfolio expected return is the weighted average of individual asset returns:\n<h4>E(Rp) = Σ wi × E(Ri)</h4>\n\nThis is straightforward — if AAPL is 30% of your portfolio and you expect 20% return, AAPL contributes 6% to portfolio return.\n\n<h3>Portfolio Risk — Where It Gets Interesting</h3>\n\nPortfolio risk is NOT the weighted average of individual risks. This is the single most important insight in Modern Portfolio Theory.\n\n<h4>σp² = Σ Σ wi × wj × σi × σj × ρij</h4>\n\nThe correlation term (ρij) is what creates the 'free lunch' of diversification. When assets aren't perfectly correlated (ρ < 1), portfolio volatility is LESS than the weighted average of individual volatilities.\n\n<h3>The Sharpe Ratio</h3>\n\n<h4>S = (Rp − Rf) / σp</h4>\n\nThis measures excess return per unit of total risk. It's the most widely used risk-adjusted performance metric. In Quantex, every portfolio you build shows a real-time Sharpe ratio computed from the full covariance matrix.\n\n<h3>The Efficient Frontier</h3>\n\nFor any given return level, there exists a portfolio with minimum risk. The set of all such portfolios forms the efficient frontier. Every portfolio below this curve is suboptimal — you can get the same return with less risk, or more return with the same risk.\n\nThe Frontier tab in Quantex shows this visually. Your portfolio appears as a triangle — if it's below the curve, the optimizer can improve it."},
+     quiz:[
+       {q:"A portfolio is 60% stocks (expected return 12%, vol 20%) and 40% bonds (expected return 4%, vol 6%). What is the expected portfolio return?",opts:["8.8%","8.0%","9.2%","7.6%"],correct:0,explain:"E(Rp) = 0.60 × 12% + 0.40 × 4% = 7.2% + 1.6% = 8.8%"},
+       {q:"If two assets have a correlation of -1.0, what is theoretically possible?",opts:["Zero portfolio risk","Maximum diversification","Infinite return","Negative beta"],correct:0,explain:"With ρ = -1, you can theoretically construct a portfolio with zero volatility by choosing the right weights. This is the extreme case of diversification benefit."},
+       {q:"Your portfolio has a return of 15%, risk-free rate is 4%, and volatility is 22%. What is the Sharpe ratio?",opts:["0.50","0.68","0.41","0.75"],correct:0,explain:"Sharpe = (15% − 4%) / 22% = 11% / 22% = 0.50"},
+       {q:"Which statement about the efficient frontier is TRUE?",opts:["Portfolios on the frontier have the highest return for each risk level","All portfolios on the frontier have the same Sharpe ratio","The frontier is a straight line","Diversification has no effect on the frontier"],correct:0,explain:"The efficient frontier is the set of optimal portfolios — for each risk level, no portfolio exists with higher expected return."},
+     ]},
+    {id:"capm",level:"L1",title:"CAPM and Beta",topic:"Portfolio Management",
+     reading:{title:"The Capital Asset Pricing Model",content:"<h3>Systematic vs. Unsystematic Risk</h3>\n\nTotal risk = Systematic risk + Unsystematic risk\n\nSystematic risk (market risk) cannot be diversified away — it affects all assets. Think: recessions, interest rate changes, geopolitical events.\n\nUnsystematic risk (specific risk) CAN be diversified away. Think: a CEO departure, a product recall, an earnings miss at one company.\n\n<h3>Beta (β)</h3>\n\n<h4>βi = Cov(Ri, Rm) / Var(Rm)</h4>\n\nBeta measures an asset's sensitivity to market movements. β = 1.0 means the asset moves with the market. β > 1.0 amplifies market moves. β < 1.0 dampens them. β < 0 moves opposite to the market (rare, but gold and some bonds exhibit this).\n\nIn Quantex, your portfolio beta is the weighted average of individual betas. The Metrics dashboard shows this in real time.\n\n<h3>The CAPM Equation</h3>\n\n<h4>E(Ri) = Rf + βi × [E(Rm) − Rf]</h4>\n\nThis says: the expected return of any asset equals the risk-free rate plus a risk premium proportional to its beta. An asset with β = 1.5 should earn 1.5× the market risk premium.\n\n<h3>Alpha</h3>\n\n<h4>α = Actual Return − CAPM Expected Return</h4>\n\nPositive alpha means the portfolio outperformed what CAPM predicted given its beta. This is the definition of 'skill' in active management. The Metrics tab shows your alpha as part of Return Attribution."},
+     quiz:[
+       {q:"A stock has beta of 1.3, the risk-free rate is 4%, and the market risk premium is 8%. What is the expected return per CAPM?",opts:["14.4%","12.0%","16.4%","10.8%"],correct:0,explain:"E(R) = 4% + 1.3 × 8% = 4% + 10.4% = 14.4%"},
+       {q:"If a portfolio returns 18% with beta 1.2, risk-free rate 4%, and market return 12%, what is the alpha?",opts:["4.4%","6.0%","2.4%","8.0%"],correct:0,explain:"CAPM expected = 4% + 1.2 × (12% − 4%) = 4% + 9.6% = 13.6%. Alpha = 18% − 13.6% = 4.4%."},
+       {q:"Which type of risk does beta measure?",opts:["Systematic risk","Unsystematic risk","Total risk","Credit risk"],correct:0,explain:"Beta measures systematic (market) risk only. It tells you how sensitive the asset is to broad market movements."},
+       {q:"Adding more stocks to a portfolio primarily reduces:",opts:["Unsystematic risk","Systematic risk","Both equally","Neither"],correct:0,explain:"Diversification eliminates unsystematic (company-specific) risk. Systematic risk remains regardless of how many stocks you hold."},
+     ]},
+    {id:"var_risk",level:"L2",title:"VaR and Risk Management",topic:"Risk Management",
+     reading:{title:"Value at Risk and Beyond",content:"<h3>Value at Risk (VaR)</h3>\n\nVaR answers one question: 'What is the maximum expected loss over a given period at a given confidence level?'\n\n<h4>Parametric VaR₉₅ = −(μ − 1.645σ)</h4>\n\nA daily VaR₉₅ of 2.1% means: 'On 95% of days, the portfolio won't lose more than 2.1% of its value.' Equivalently: 'On about 1 out of 20 trading days, losses could exceed 2.1%.'\n\n<h3>Limitations of VaR</h3>\n\nVaR doesn't tell you HOW BAD things get in the worst cases. A VaR of 2.1% could mean the worst-case loss is 2.5% or 25% — VaR doesn't distinguish.\n\n<h3>Conditional VaR (CVaR / Expected Shortfall)</h3>\n\n<h4>CVaR₉₅ = E[Loss | Loss > VaR₉₅]</h4>\n\nCVaR answers: 'When we DO exceed VaR, what's the average loss?' This captures tail risk that VaR misses. Regulators increasingly prefer CVaR over VaR for this reason.\n\nIn Quantex, both VaR₉₅ and CVaR₉₅ are computed from your portfolio's volatility and displayed in the Metrics dashboard. The (?) icon next to each shows the formula with your actual numbers."},
+     quiz:[
+       {q:"A portfolio has daily VaR₉₅ of $15,000 on a $1M portfolio. What does this mean?",opts:["95% of days, loss won't exceed $15K","The portfolio will lose exactly $15K","Maximum possible loss is $15K","The portfolio always loses $15K"],correct:0,explain:"VaR₉₅ = $15,000 means on 95% of trading days, the loss will be $15,000 or less. On 5% of days (about 1 per month), it could be worse."},
+       {q:"Why is CVaR considered superior to VaR?",opts:["It measures the average loss in the tail","It's easier to compute","It's always smaller than VaR","It ignores extreme events"],correct:0,explain:"CVaR (Expected Shortfall) tells you the average loss when VaR is exceeded. It captures tail risk severity, not just the threshold."},
+       {q:"For a normal distribution, VaR₉₉ uses a z-score of approximately:",opts:["2.326","1.645","1.960","2.576"],correct:0,explain:"VaR₉₉ uses z = 2.326 (99th percentile one-tailed). VaR₉₅ uses z = 1.645."},
+     ]},
+    {id:"derivatives",level:"L2",title:"Options Pricing",topic:"Derivatives",
+     reading:{title:"Black-Scholes and the Greeks",content:"<h3>Black-Scholes-Merton Model</h3>\n\n<h4>C = S₀N(d₁) − Ke^(−rT)N(d₂)</h4>\n\nFive inputs determine an option's price: spot price (S), strike price (K), time to expiration (T), risk-free rate (r), and volatility (σ). Of these, volatility is the only one not directly observable — it must be estimated or implied from market prices.\n\n<h3>The Greeks</h3>\n\nDelta (Δ): How much the option price changes per $1 move in the stock. A call with Δ = 0.60 gains $0.60 when the stock rises $1.\n\nGamma (Γ): How fast delta changes. High gamma means delta is unstable — the option's behavior changes rapidly near the strike.\n\nTheta (Θ): Daily time decay. All else equal, options lose value every day. Theta accelerates as expiration approaches.\n\nVega (V): Sensitivity to implied volatility. A vega of $0.15 means the option gains $0.15 for each 1% increase in IV.\n\nRho (ρ): Sensitivity to interest rates. Usually small, but matters for LEAPS.\n\n<h3>Try It in Quantex</h3>\n\nThe Derivatives tab has a live Black-Scholes calculator. Adjust the inputs and watch how each Greek responds. The Strategy Sandbox lets you build covered calls, protective puts, straddles, and more with real-time payoff diagrams."},
+     quiz:[
+       {q:"Which Greek measures the rate of change of delta?",opts:["Gamma","Vega","Theta","Rho"],correct:0,explain:"Gamma = ∂Δ/∂S = ∂²C/∂S². It measures how quickly delta changes as the stock moves. High gamma near the strike means the option's behavior is most sensitive there."},
+       {q:"A call option has theta of -$0.05. What happens overnight (all else equal)?",opts:["The option loses $0.05","The option gains $0.05","Nothing changes","Delta increases"],correct:0,explain:"Theta represents daily time decay. A theta of -$0.05 means the option loses $0.05 per day from the passage of time alone."},
+       {q:"Which input to Black-Scholes is NOT directly observable?",opts:["Volatility","Stock price","Strike price","Risk-free rate"],correct:0,explain:"Volatility must be estimated or implied from market prices. All other inputs (S, K, T, r) are known quantities."},
+       {q:"In a covered call, what is your maximum profit?",opts:["(Strike − Stock Price) + Premium","Unlimited","Premium collected only","Strike price"],correct:0,explain:"Max profit = (K − S) + premium. You own the stock (gains up to strike) plus the premium collected. Upside is capped at the strike."},
+     ]},
+    {id:"portfolio_opt",level:"L2",title:"Portfolio Optimization",topic:"Portfolio Management",
+     reading:{title:"Mean-Variance Optimization and Beyond",content:"<h3>Markowitz Mean-Variance Optimization</h3>\n\nThe goal: find the portfolio weights that maximize return for a given level of risk (or minimize risk for a given return).\n\n<h4>Minimize: σp² = wᵀΣw</h4>\n<h4>Subject to: wᵀμ = target return, wᵀ1 = 1</h4>\n\nThis is a quadratic programming problem solved by algorithms like SLSQP. The Quantex optimizer runs this with your actual portfolio tickers and the regime-aware covariance matrix.\n\n<h3>Constraints Matter</h3>\n\nUnconstrained optimization often produces extreme portfolios (200% in one stock, -100% in another). Real portfolios need constraints: maximum position size, no short selling, sector limits, beta caps. These come from your investor profile in Quantex.\n\n<h3>Risk Parity</h3>\n\nInstead of equal-weighting by capital, risk parity equal-weights by risk contribution. Each position contributes the same amount of risk to the portfolio. This means volatile assets get smaller weights and stable assets get larger weights.\n\n<h4>Target: RC₁ = RC₂ = ... = RCn = 1/n</h4>\n\nThe Risk Parity challenge in the Challenges tab asks you to build this yourself."},
+     quiz:[
+       {q:"What does the efficient frontier represent?",opts:["Maximum return portfolios for each risk level","All possible portfolios","Only stock portfolios","Minimum return portfolios"],correct:0,explain:"The efficient frontier is the set of portfolios offering the highest expected return for each level of risk. Portfolios below it are suboptimal."},
+       {q:"In risk parity, a high-volatility stock should receive:",opts:["A smaller weight than a low-volatility stock","An equal weight","A larger weight","No allocation"],correct:0,explain:"Risk parity allocates inversely to volatility so each position contributes equal risk. High-vol assets get smaller capital weights."},
+       {q:"Why is the covariance matrix crucial for optimization?",opts:["It captures how assets move together","It measures individual returns","It predicts future prices","It calculates dividends"],correct:0,explain:"The covariance matrix Σ captures pairwise relationships between all assets. Without it, you can't compute true portfolio variance — you'd overestimate risk by ignoring diversification."},
+     ]},
+  ];
+
+  const mod=MODULES[activeMod];
+  const modProgress=(modId)=>{const p=progress[modId]||{};const total=3;let done=0;if(p.reading)done++;if(p.quiz)done++;if(p.interactive)done++;return done/total*100;};
+  const overallProgress=MODULES.reduce((a,m)=>a+modProgress(m.id),0)/MODULES.length;
+
+  // Quiz logic
+  const[qIdx,setQIdx]=useState(0);
+  const[selected,setSelected]=useState(null);
+  const[showResult,setShowResult]=useState(false);
+  const[score,setScore]=useState(0);
+  const[qDone,setQDone]=useState(false);
+
+  const resetQuiz=()=>{setQIdx(0);setSelected(null);setShowResult(false);setScore(0);setQDone(false);};
+  useEffect(()=>{resetQuiz();},[activeMod]);
+
+  const submitAnswer=()=>{
+    if(selected===null)return;
+    setShowResult(true);
+    if(selected===mod.quiz[qIdx].correct)setScore(s=>s+1);
+  };
+  const nextQ=()=>{
+    if(qIdx+1>=mod.quiz.length){
+      setQDone(true);
+      markRead(mod.id,"quiz");
+    }else{
+      setQIdx(i=>i+1);setSelected(null);setShowResult(false);
+    }
+  };
+
+  return e("div",null,
+    // Progress overview
+    e("div",{className:"card"},
+      e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        e("div",null,
+          e("div",{className:"card-title",style:{marginBottom:2}},"CFA STUDY PROGRAM"),
+          e("div",{style:{fontSize:11,color:"#64748b"}},MODULES.length+" modules · "+MODULES.reduce((a,m)=>a+m.quiz.length,0)+" quiz questions")
+        ),
+        e("div",{style:{textAlign:"right"}},
+          e("div",{style:{fontSize:22,fontWeight:800,fontFamily:"'Outfit',sans-serif",color:"#a5b4fc"}},Math.round(overallProgress)+"%"),
+          e("div",{style:{fontSize:9,color:"#4a5568"}},"overall progress")
+        )
+      ),
+      e("div",{className:"ch-prog",style:{marginTop:8}},e("div",{className:"ch-prog-fill",style:{width:overallProgress+"%"}}))
+    ),
+
+    e("div",{className:"course-grid"},
+      // Module list
+      e("div",null,
+        MODULES.map((m,i)=>{
+          const prog=modProgress(m.id);
+          return e("div",{key:m.id,className:"mod-card"+(activeMod===i?" active":""),onClick:()=>setActiveMod(i)},
+            e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+              e("div",null,
+                e("div",{style:{fontSize:12,fontWeight:700,color:activeMod===i?"#a5b4fc":"#e2e8f0"}},m.title),
+                e("div",{style:{display:"flex",gap:4,marginTop:3}},e("span",{className:"cfa-tag"},m.level),e("span",{style:{fontSize:9,color:"#4a5568"}},m.topic))
+              ),
+              e("div",{style:{fontSize:11,fontWeight:700,color:prog>=100?"#34d399":"#64748b"}},Math.round(prog)+"%")
+            ),
+            e("div",{className:"mod-prog-bar"},e("div",{className:"mod-prog-fill",style:{width:prog+"%"}}))
+          );
+        })
+      ),
+
+      // Active module content
+      e("div",null,
+        e("div",{style:{display:"flex",gap:4,marginBottom:10}},
+          ["reading","quiz","video"].map(s=>e("button",{key:s,className:"btn btn-xs"+(activeSection===s?" btn-p":""),onClick:()=>setActiveSection(s),style:{textTransform:"capitalize"}},
+            s==="reading"?"📖 Reading":s==="quiz"?"✏️ Quiz ("+mod.quiz.length+")":"🎬 Video"
+          ))
+        ),
+
+        // Reading
+        activeSection==="reading"&&e("div",{className:"card"},
+          e("div",{className:"card-title"},mod.reading.title),
+          e("div",{className:"reading-content",dangerouslySetInnerHTML:{__html:mod.reading.content}}),
+          !progress[mod.id]?.reading&&e("button",{className:"btn btn-p",style:{marginTop:12},onClick:()=>markRead(mod.id,"reading")},"✓ Mark as Read")
+        ),
+
+        // Quiz
+        activeSection==="quiz"&&e("div",{className:"card"},
+          e("div",{className:"card-title"},"QUIZ — "+mod.title),
+          qDone?e("div",null,
+            e("div",{style:{textAlign:"center",padding:20}},
+              e("div",{style:{fontSize:40,fontWeight:800,fontFamily:"'Outfit',sans-serif",color:score>=mod.quiz.length*.7?"#34d399":"#fbbf24"}},score+"/"+mod.quiz.length),
+              e("div",{style:{fontSize:13,color:"#64748b",marginTop:4}},score>=mod.quiz.length*.7?"Great job! You passed.":"Review the material and try again."),
+              e("button",{className:"btn btn-p",style:{marginTop:12},onClick:resetQuiz},"Retake Quiz")
+            )
+          ):e("div",null,
+            e("div",{style:{fontSize:10,color:"#4a5568",marginBottom:8}},"Question "+(qIdx+1)+" of "+mod.quiz.length),
+            e("div",{style:{fontSize:13,fontWeight:600,color:"#e2e8f0",marginBottom:12,lineHeight:1.6}},mod.quiz[qIdx].q),
+            mod.quiz[qIdx].opts.map((opt,i)=>e("button",{key:i,className:"quiz-option"+(selected===i?" selected":"")+(showResult&&i===mod.quiz[qIdx].correct?" correct":"")+(showResult&&selected===i&&i!==mod.quiz[qIdx].correct?" wrong":""),onClick:()=>{if(!showResult)setSelected(i);},disabled:showResult},String.fromCharCode(65+i)+". "+opt)),
+            showResult&&e("div",{className:"info-box",style:{marginTop:8}},mod.quiz[qIdx].explain),
+            e("div",{style:{display:"flex",justifyContent:"flex-end",gap:6,marginTop:12}},
+              !showResult&&e("button",{className:"btn btn-p",onClick:submitAnswer,disabled:selected===null},"Check Answer"),
+              showResult&&e("button",{className:"btn btn-p",onClick:nextQ},qIdx+1>=mod.quiz.length?"See Results":"Next →")
+            )
+          )
+        ),
+
+        // Video
+        activeSection==="video"&&e("div",{className:"card"},
+          e("div",{className:"card-title"},"VIDEO — "+mod.title),
+          e("div",{className:"vid-placeholder"},
+            e("div",{style:{fontSize:24,marginBottom:8}},"🎬"),
+            e("div",null,"Video content coming soon"),
+            e("div",{style:{marginTop:8,fontSize:10}},"In the full version, each module will include"),
+            e("div",{style:{fontSize:10}},"curated video lessons from financial education creators")
+          )
+        )
+      )
+    )
+  );
+}
+
+// ── Root App ──────────────────────────────────────────────────────────────────
+function App({user,logout}){
+  const[profile,setProfile]=useState(()=>{try{const s=localStorage.getItem("qx_profile");return s?JSON.parse(s):null;}catch(e){return null;}});
+  const[tab,setTab]=useState(()=>{try{return localStorage.getItem("qx_profile")?"disco":"onboard";}catch(e){return "onboard";}});
+  const[ports,setPorts]=useState(()=>{try{const s=localStorage.getItem("qx_ports");return s?JSON.parse(s):{A:{},B:{},C:{}};}catch(e){return{A:{},B:{},C:{}};}});
+  const[ap,setAp]=useState("A");
+  const[screening,setScreening]=useState(false);
+  const[backendOk,setBackendOk]=useState(null); // null=unknown, true/false
+  const[optLoading,setOptLoading]=useState(false);
+  const[screenError,setScreenError]=useState(null);
+
+  useEffect(()=>{try{if(profile)localStorage.setItem("qx_profile",JSON.stringify(profile));else localStorage.removeItem("qx_profile");}catch(e){}},[profile]);
+  useEffect(()=>{try{localStorage.setItem("qx_ports",JSON.stringify(ports));}catch(e){}},[ports]);
+
+  // Check backend health on mount
+  useEffect(()=>{
+    fetch(BACKEND_URL+"/health",{signal:AbortSignal.timeout(5000)})
+      .then(r=>r.json()).then(()=>setBackendOk(true))
+      .catch(()=>setBackendOk(false));
+  },[]);
+
+  // Screen assets after profile is set (or on mount if profile exists)
+  const screenAssets=useCallback(async(p)=>{
+    if(!p)return;
+    setScreening(true);setScreenError(null);
+    const horMap={"<1 year":.75,"1-3 years":2,"3-7 years":5,"7-15 years":10,"15+ years":20};
+    try{
+      const data=await apiFetch("/api/screen",{
+        goal:p.goal,risk_score:p.score,
+        time_horizon_years:horMap[p.hor]||7,max_results:40,
+      });
+      if(data.shortlist&&data.shortlist.length>0){
+        ASSETS=data.shortlist.map(mapScreened);
+        setBackendOk(true);
+      }
+    }catch(err){
+      console.warn("Screening failed, using fallback assets:",err.message);
+      ASSETS=FALLBACK_ASSETS;
+      setScreenError(err.message);
+      setBackendOk(false);
+    }finally{setScreening(false);}
+  },[]);
+
+  // Trigger screening when profile exists
+  useEffect(()=>{if(profile&&backendOk!==false)screenAssets(profile);},[profile,backendOk]);
+
+  const resetAll=()=>{if(!confirm("Reset all Quantex data? This clears your profile and all portfolios."))return;try{localStorage.removeItem("qx_profile");localStorage.removeItem("qx_ports");}catch(e){}ASSETS=FALLBACK_ASSETS;setProfile(null);setPorts({A:{},B:{},C:{}});setTab("onboard");};
+
+  const onDone=p=>{setProfile(p);setTab("disco");};
+  const addToPort=(pn,id)=>{setPorts(prev=>{const w={...prev[pn]};if(w[id]!==undefined)return prev;const n=Object.keys(w).length+1;const each=Math.floor(100/n);const nw={};Object.keys(w).forEach(k=>nw[k]=each);nw[id]=each;nw[Object.keys(nw)[0]]+=100-each*n;return{...prev,[pn]:nw};});};
+  const rmFromPort=(pn,id)=>{setPorts(prev=>{const nw={...prev[pn]};delete nw[id];const ks=Object.keys(nw);if(ks.length>0){const each=Math.floor(100/ks.length);ks.forEach(k=>nw[k]=each);nw[ks[0]]+=100-each*ks.length;}return{...prev,[pn]:nw};});};
+  const updateW=(pn,id,v)=>setPorts(prev=>({...prev,[pn]:{...prev[pn],[id]:v}}));
+
+  // Optimizer: try backend (SLSQP), fall back to local Monte Carlo
+  const optPort=async(pn,goal,maxPos)=>{
+    const t=Object.keys(ports[pn]);
+    if(!t.length)return;
+    if(backendOk){
+      setOptLoading(true);
+      try{
+        const result=await optimizeBackend(t,goal,maxPos,profile?.score,ports[pn]);
+        setPorts(prev=>({...prev,[pn]:result.weights}));
+        setOptLoading(false);return;
+      }catch(err){console.warn("Backend optimizer failed, using local:",err.message);}
+      setOptLoading(false);
+    }
+    // Local fallback
+    setPorts(prev=>({...prev,[pn]:optimizeLocal(t,goal,maxPos)}));
+  };
+
+  const locked=!profile;
+  const aw=ports[ap]||{};
+  const as=Object.keys(aw).length>0?calcStats(aw):null;
+
+  const TABS=[
+    {id:"onboard",l:"① PROFILE",lk:false,done:!!profile},
+    {id:"disco",l:"② DISCOVERY",lk:locked},
+    {id:"metrics",l:"METRICS",lk:locked},
+    {id:"corr",l:"CORRELATIONS",lk:locked},
+    {id:"frontier",l:"FRONTIER",lk:locked},
+    {id:"trades",l:"TRADE DESK",lk:locked},
+    {id:"deriv",l:"⚡ DERIVATIVES",lk:false},
+    {id:"paper",l:"📄 PAPER TRADE",lk:false},
+    {id:"challenges",l:"🎯 CHALLENGES",lk:false},
+    {id:"course",l:"📚 COURSE",lk:false},
+    {id:"compare",l:"⇄ COMPARE",lk:locked},
+    {id:"pA",l:"◈ A",lk:locked,pn:"A"},{id:"pB",l:"◈ B",lk:locked,pn:"B"},{id:"pC",l:"◈ C",lk:locked,pn:"C"},
+  ];
+
+  const statusDot=backendOk===true?"🟢":backendOk===false?"🔴":"⟳";
+  const statusTip=backendOk===true?"Backend connected — real data":"Backend offline — using sample data";
+
+  return e("div",{id:"root"},
+    e("div",{className:"topbar"},
+      e("div",{className:"logo"},"QUANTEX",e("span",{title:statusTip,style:{fontSize:8,marginLeft:6,cursor:"help"}},statusDot)),
+      e("div",{className:"mkt"},Object.entries(MKT).map(([k,v])=>e("div",{key:k,className:"mkt-item"},e("div",{className:"mkt-lbl"},k),e("div",{className:"mkt-val "+(v.ch>=0?"up":"dn")},v.p)))),
+      profile?e("div",{style:{display:"flex",alignItems:"center",gap:6}},e("div",{className:"chip",onClick:()=>setTab("onboard"),title:"Update profile"},profile.score+"/100 · "+profile.cat+" · "+profile.goal+" ✎"),e("button",{className:"btn btn-xs",onClick:resetAll,title:"Reset all data",style:{color:"#475569",fontSize:9}},"↺ RESET"),user&&user.name!=="Guest"&&e("span",{style:{fontSize:10,color:"#64748b"}},user.name),logout&&e("button",{className:"btn btn-xs",onClick:logout,style:{color:"#475569",fontSize:9}},"Sign Out")):e("div",{style:{display:"flex",alignItems:"center",gap:6}},e("div",{className:"chip",style:{cursor:"default"}},"Complete ① PROFILE to unlock"),user&&user.name!=="Guest"&&e("span",{style:{fontSize:10,color:"#64748b"}},user.name),logout&&e("button",{className:"btn btn-xs",onClick:logout,style:{color:"#475569",fontSize:9}},"Sign Out"))
+    ),
+    screening&&e("div",{style:{padding:"8px 16px",background:"#0d1228",borderBottom:"1px solid #1a2540",fontSize:11,color:"#818cf8"}},e("span",{className:"spin"},"◌")," Screening Nasdaq universe — this may take 30-60s on first load..."),
+    as&&e("div",{className:"sbar"},
+      e("div",{className:"sb-item",style:{borderRight:"1px solid #1a2540"}},e("div",{className:"sb-lbl"},"PORT "+ap),e("div",{className:"sb-val",style:{color:"#818cf8",fontSize:11}},Object.keys(aw).length+" pos.")),
+      [["RETURN",(as.ret>0?"+":"")+as.ret+"%",as.ret>=0?"up":"dn"],["VOL σ",as.vol+"%",""],["SHARPE",as.sh,as.sh>=1?"up":as.sh>=.5?"wa":"dn"],["BETA",as.beta,""],["SORTINO",as.so,""],["VAR 95%",as.var95+"%","dn"],["DIV YIELD",as.divY+"%",""]].map(([l,v,cls])=>e("div",{key:l,className:"sb-item"},e("div",{className:"sb-lbl"},l),e("div",{className:"sb-val "+cls},v)))
+    ),
+    e("div",{className:"nav"},TABS.map(t=>e("button",{key:t.id,className:"nav-tab"+(tab===t.id?" active":"")+(t.lk?" locked":"")+(t.done?" done":""),onClick:()=>{if(t.lk)return;if(t.pn)setAp(t.pn);setTab(t.id);},title:t.lk?"Complete ① PROFILE first":""},t.l))),
+    e("div",{className:"body"},
+      e("div",{className:"main"},
+        screenError&&tab==="disco"&&e("div",{className:"warn-box",style:{margin:"0 0 10px"}},"⚠ Backend: "+screenError+" — showing sample data. Start the backend with: uvicorn app.main:app"),
+        tab==="onboard"&&e(Onboard,{onDone}),
+        tab==="disco"&&e(Discovery,{profile,ports,onAdd:addToPort}),
+        tab==="metrics"&&e(Metrics,{weights:aw}),
+        tab==="corr"&&e(Correlations,{weights:aw,profile,backendOk}),
+        tab==="frontier"&&e(Frontier,{weights:aw,profile,backendOk}),
+        tab==="trades"&&e(TradeDeck,{weights:aw,profile}),
+        tab==="deriv"&&e(DerivativesSandbox,{backendOk}),
+        tab==="paper"&&e(PaperTrading,{backendOk}),
+        tab==="challenges"&&e(Challenges,{profile,ports,activePort:ap}),
+        tab==="course"&&e(CourseHub,{profile,ports,activePort:ap}),
+        tab==="compare"&&e(Compare,{ports}),
+        tab==="pA"&&e(PortTab,{name:"Portfolio A",weights:ports.A,profile,onUpdate:(id,v)=>updateW("A",id,v),onRemove:id=>rmFromPort("A",id),onOpt:(goal,mp)=>optPort("A",goal,mp),optLoading}),
+        tab==="pB"&&e(PortTab,{name:"Portfolio B",weights:ports.B,profile,onUpdate:(id,v)=>updateW("B",id,v),onRemove:id=>rmFromPort("B",id),onOpt:(goal,mp)=>optPort("B",goal,mp),optLoading}),
+        tab==="pC"&&e(PortTab,{name:"Portfolio C",weights:ports.C,profile,onUpdate:(id,v)=>updateW("C",id,v),onRemove:id=>rmFromPort("C",id),onOpt:(goal,mp)=>optPort("C",goal,mp),optLoading})
+      ),
+      e("div",{className:"side"},e(Advisor,{profile,ports,activePort:ap}))
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(e(LoginGate,null,(user,logout)=>e(App,{user,logout})));
+</script>
+</body>
+</html>

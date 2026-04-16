@@ -1,0 +1,554 @@
+"""
+Screening Pipeline
+Takes the full Nasdaq universe through four stages:
+  1. Universe load (all Nasdaq-listed tickers)
+  2. Hard gates (market cap, volume, price, data availability)
+  3. Factor scoring (momentum, quality, value, low-vol, yield)
+  4. Profile-aware fit scoring (goal-weighted factor composite)
+
+Output: ranked shortlist of 30-40 candidates with scores and metadata.
+"""
+import logging
+from dataclasses import dataclass, field
+from typing import Optional
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+
+from app.config import (
+    SCREEN_MIN_MARKET_CAP,
+    SCREEN_MIN_AVG_VOLUME,
+    SCREEN_MIN_PRICE,
+    SCREEN_MIN_HISTORY_DAYS,
+    FACTOR_WEIGHTS_DEFAULT,
+    FACTOR_WEIGHTS_BY_GOAL,
+    SCREEN_STAGE2_SIZE,
+    SCREEN_FINAL_SIZE,
+    RISK_FREE_RATE,
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ── Data Classes ─────────────────────────────────────────────────────────────
+
+@dataclass
+class ScreenedAsset:
+    """A single screened asset with all computed scores and metadata."""
+    ticker: str
+    name: str
+    sector: str
+    industry: str
+    market_cap: float
+    price: float
+    avg_volume: float
+
+    # Return metrics
+    return_1y: float
+    return_6m: float
+    return_3m: float
+    volatility: float
+    sharpe: float
+    beta: float
+    max_drawdown: float
+    dividend_yield: float
+
+    # Valuation
+    pe_ratio: float | None
+    forward_pe: float | None
+    pb_ratio: float | None
+    earnings_yield: float | None
+
+    # Factor z-scores
+    z_momentum: float = 0.0
+    z_quality: float = 0.0
+    z_value: float = 0.0
+    z_low_vol: float = 0.0
+    z_yield: float = 0.0
+
+    # Composite scores
+    factor_composite: float = 0.0     # weighted z-score composite
+    fit_score: int = 50               # 0-100 profile-aware score
+    rank: int = 0
+
+
+@dataclass
+class ScreeningResult:
+    """Full output of the screening pipeline."""
+    shortlist: list[ScreenedAsset]
+    universe_size: int                # how many tickers we started with
+    passed_gates: int                 # how many survived hard gates
+    stage2_size: int                  # how many survived factor scoring
+    final_size: int                   # how many in final output
+    goal_used: str
+    factor_weights: dict[str, float]
+    sector_distribution: dict[str, int]
+
+
+# ── Stage 0: Universe Loading ────────────────────────────────────────────────
+
+def load_nasdaq_tickers() -> list[str]:
+    """
+    Load all Nasdaq-listed tickers.
+
+    Primary: fetch from yfinance's screener.
+    Fallback: use a curated list of Nasdaq-100 + extended tickers.
+
+    In production, replace with a daily-refreshed file from
+    Nasdaq's FTP (ftp://ftp.nasdaqtrader.com/SymbolDirectory/).
+    """
+    # Attempt to get tickers programmatically
+    try:
+        # Use a broad Nasdaq index as starting point
+        # yfinance doesn't have a direct "all Nasdaq" list,
+        # so we use the QQQ holdings + broader screening
+        qqq = yf.Ticker("QQQ")
+        holdings = qqq.get_holdings()
+        if holdings is not None and not holdings.empty:
+            tickers = holdings.index.tolist()
+            if len(tickers) > 50:
+                logger.info(f"Loaded {len(tickers)} tickers from QQQ holdings")
+                return tickers
+    except Exception as e:
+        logger.warning(f"Could not load QQQ holdings: {e}")
+
+    # Fallback: curated Nasdaq universe (top ~300 by market cap)
+    # In production, load from database or Nasdaq FTP file
+    logger.info("Using fallback curated Nasdaq ticker list")
+    return _FALLBACK_TICKERS
+
+
+# Fallback list: top Nasdaq stocks by market cap
+# Production version loads from Nasdaq FTP daily
+_FALLBACK_TICKERS = [
+    # Mega-cap tech
+    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "AVGO", "TSLA", "COST",
+    "NFLX", "AMD", "ADBE", "QCOM", "INTC", "TXN", "INTU", "AMAT", "ISRG", "BKNG",
+    "ADP", "LRCX", "KLAC", "SNPS", "CDNS", "MRVL", "ADI", "NXPI", "MCHP", "FTNT",
+    # Healthcare
+    "AMGN", "GILD", "VRTX", "REGN", "ILMN", "DXCM", "IDXX", "BIIB", "MRNA", "SGEN",
+    "ALGN", "HOLX", "TECH", "PODD", "NBIX", "EXAS", "RARE", "INCY", "BMRN", "ALNY",
+    # Consumer
+    "PEP", "SBUX", "MDLZ", "MNST", "KDP", "KHC", "WBA", "DLTR", "ROST", "ORLY",
+    "FAST", "ODFL", "CPRT", "PAYX", "CTAS", "PCAR", "AZO", "LULU", "EBAY", "DDOG",
+    # Communication/Media
+    "CMCSA", "TMUS", "CHTR", "ATVI", "EA", "ZM", "MTCH", "ROKU", "TTD", "CRWD",
+    # Financials & other
+    "PYPL", "CSX", "CEG", "XEL", "EXC", "AEP", "OXY", "FANG", "VRSK", "ANSS",
+    "TEAM", "WDAY", "ZS", "PANW", "SPLK", "OKTA", "MDB", "NET", "SNOW", "PLTR",
+    "COIN", "HOOD", "LCID", "RIVN", "MELI", "BIDU", "JD", "PDD", "NTES", "TCOM",
+    # Biotech
+    "SIRI", "ABNB", "DASH", "RBLX", "U", "DUOL", "SOFI", "AFRM", "UPST", "BILL",
+    "HUBS", "VEEV", "COUP", "DOCU", "TWLO", "CFLT", "PATH", "DKNG", "PENN", "MGNI",
+    # Semi & hardware
+    "MU", "ON", "SWKS", "MPWR", "ENTG", "WOLF", "CRUS", "SLAB", "RMBS", "ACLS",
+    "LSCC", "SITM", "POWI", "DIOD", "AMBA", "AAON", "SMCI", "ARM", "CRDO", "CEVA",
+    # Industrial tech
+    "HON", "GE", "CARR", "OTIS", "ZBRA", "TRMB", "GNRC", "AXON", "TER", "KEYS",
+    "FSLR", "ENPH", "SEDG", "RUN", "NOVA", "ARRY", "STEM", "BLDP", "PLUG", "BE",
+]
+
+
+# ── Stage 1: Hard Gates ─────────────────────────────────────────────────────
+
+def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
+    """
+    Fetch fundamental data for all tickers using yfinance batch.
+    Returns DataFrame with market_cap, avg_volume, price, sector, etc.
+
+    This is the most expensive call — batches tickers to minimize API calls.
+    """
+    logger.info(f"Fetching fundamentals for {len(tickers)} tickers...")
+    records = []
+    batch_size = 50  # yfinance handles batches reasonably well
+
+    for i in range(0, len(tickers), batch_size):
+        batch = tickers[i:i + batch_size]
+        tickers_obj = yf.Tickers(" ".join(batch))
+
+        for ticker_str in batch:
+            try:
+                t = tickers_obj.tickers.get(ticker_str)
+                if t is None:
+                    continue
+                info = t.info
+                if not info or info.get("regularMarketPrice") is None:
+                    continue
+
+                records.append({
+                    "ticker": ticker_str,
+                    "name": info.get("shortName", info.get("longName", ticker_str)),
+                    "sector": info.get("sector", "Unknown"),
+                    "industry": info.get("industry", "Unknown"),
+                    "market_cap": info.get("marketCap", 0) or 0,
+                    "price": info.get("regularMarketPrice", 0) or 0,
+                    "avg_volume": info.get("averageVolume", 0) or 0,
+                    "dividend_yield": min(round(((info.get("dividendYield") or 0) * 100 if (info.get("dividendYield") or 0) < 1 else (info.get("dividendYield") or 0)), 2), 25),
+                    "pe_ratio": info.get("trailingPE"),
+                    "forward_pe": info.get("forwardPE"),
+                    "pb_ratio": info.get("priceToBook"),
+                    "earnings_yield": (
+                        1.0 / info["trailingPE"] if info.get("trailingPE") and info["trailingPE"] > 0
+                        else None
+                    ),
+                })
+            except Exception as e:
+                logger.debug(f"Skipping {ticker_str}: {e}")
+                continue
+
+        logger.info(f"  Fetched {min(i + batch_size, len(tickers))}/{len(tickers)} tickers")
+
+    df = pd.DataFrame(records)
+    logger.info(f"Fundamentals loaded: {len(df)} tickers with valid data")
+    return df
+
+
+def apply_hard_gates(fundamentals: pd.DataFrame) -> pd.DataFrame:
+    """
+    Stage 1: Filter by market cap, volume, price, and data quality.
+    """
+    before = len(fundamentals)
+
+    passed = fundamentals[
+        (fundamentals["market_cap"] >= SCREEN_MIN_MARKET_CAP) &
+        (fundamentals["avg_volume"] >= SCREEN_MIN_AVG_VOLUME) &
+        (fundamentals["price"] >= SCREEN_MIN_PRICE)
+    ].copy()
+
+    logger.info(f"Hard gates: {before} → {len(passed)} "
+                f"(dropped {before - len(passed)} by cap/volume/price)")
+    return passed
+
+
+# ── Stage 2: Factor Scoring ──────────────────────────────────────────────────
+
+def compute_factor_scores(
+    fundamentals: pd.DataFrame,
+    returns: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Stage 2: Compute factor z-scores for each ticker.
+
+    Factors:
+      - Momentum: (0.6 × 12m return + 0.4 × 6m return), skip most recent month
+      - Quality: Sharpe ratio (risk-adjusted return quality)
+      - Value: earnings yield (inverse P/E), higher = cheaper
+      - Low Volatility: negative of annualized vol (lower vol = higher score)
+      - Yield: dividend yield
+    """
+    tickers = [t for t in fundamentals["ticker"].values if t in returns.columns]
+    if not tickers:
+        raise ValueError("No tickers have both fundamental and return data")
+
+    # Get return subsets
+    ret = returns[tickers]
+
+    # Require minimum history
+    valid_tickers = [t for t in tickers if ret[t].dropna().shape[0] >= SCREEN_MIN_HISTORY_DAYS]
+    ret = ret[valid_tickers]
+
+    logger.info(f"Factor scoring: {len(valid_tickers)} tickers with sufficient history")
+
+    # ── Compute raw factors ──────────────────────────────────────────────────
+    n_days = len(ret)
+
+    # Returns over various horizons (skip most recent 21 days for momentum — avoids reversal)
+    ret_12m = ret.iloc[:-21].iloc[-252:].sum() if n_days > 273 else ret.iloc[:-21].sum()
+    ret_6m = ret.iloc[:-21].iloc[-126:].sum() if n_days > 147 else ret.iloc[:-21].sum()
+    ret_3m = ret.iloc[-63:].sum() if n_days > 63 else ret.sum()
+    ret_1y = ret.iloc[-252:].sum() if n_days > 252 else ret.sum()
+
+    # Annualized metrics from trailing year
+    trailing = ret.iloc[-252:] if n_days > 252 else ret
+    ann_vol = trailing.std() * np.sqrt(252)
+    ann_ret = trailing.mean() * 252
+    sharpe = ann_ret / ann_vol.replace(0, np.nan)
+
+    # Beta vs QQQ
+    bench = "QQQ" if "QQQ" in ret.columns else ret.columns[0]
+    bench_var = trailing[bench].var()
+    beta = trailing.apply(
+        lambda col: col.cov(trailing[bench]) / bench_var if bench_var > 0 else 1.0
+    )
+
+    # Max drawdown
+    cum = (1 + trailing).cumprod()
+    max_dd = ((cum - cum.cummax()) / cum.cummax()).min()
+
+    # Raw factor values
+    raw = pd.DataFrame(index=valid_tickers)
+    raw["momentum"] = 0.6 * ret_12m + 0.4 * ret_6m
+    raw["quality"] = sharpe
+    raw["low_vol"] = -ann_vol  # negative so lower vol = higher score
+    raw["return_1y"] = ret_1y
+    raw["return_6m"] = ret_6m
+    raw["return_3m"] = ret_3m
+    raw["volatility"] = ann_vol
+    raw["sharpe"] = sharpe
+    raw["beta"] = beta
+    raw["max_drawdown"] = max_dd
+
+    # Merge fundamental data for value and yield factors
+    fund_indexed = fundamentals.set_index("ticker")
+    raw["value"] = fund_indexed.reindex(valid_tickers)["earnings_yield"].fillna(0)
+    raw["yield_factor"] = fund_indexed.reindex(valid_tickers)["dividend_yield"].fillna(0)
+
+    # ── Z-score normalization ────────────────────────────────────────────────
+    # Winsorize at 3σ before z-scoring to reduce outlier influence
+    for col in ["momentum", "quality", "value", "low_vol", "yield_factor"]:
+        series = raw[col].dropna()
+        if len(series) < 5:
+            continue
+        mu, sigma = series.mean(), series.std()
+        if sigma > 0:
+            raw[col] = raw[col].clip(mu - 3 * sigma, mu + 3 * sigma)
+            raw[f"z_{col}"] = (raw[col] - raw[col].mean()) / raw[col].std()
+        else:
+            raw[f"z_{col}"] = 0.0
+
+    # Rename for consistency
+    raw.rename(columns={"z_yield_factor": "z_yield"}, inplace=True)
+
+    # ── Merge back with fundamentals ─────────────────────────────────────────
+    result = fundamentals[fundamentals["ticker"].isin(valid_tickers)].copy()
+    result = result.set_index("ticker")
+
+    for col in ["z_momentum", "z_quality", "z_value", "z_low_vol", "z_yield",
+                "return_1y", "return_6m", "return_3m", "volatility", "sharpe",
+                "beta", "max_drawdown"]:
+        if col in raw.columns:
+            result[col] = raw[col]
+
+    result = result.fillna(0).reset_index()
+
+    logger.info(f"Factor scoring complete: {len(result)} tickers scored")
+    return result
+
+
+def rank_by_composite(
+    scored: pd.DataFrame,
+    factor_weights: dict[str, float],
+    top_n: int = SCREEN_STAGE2_SIZE,
+) -> pd.DataFrame:
+    """
+    Compute weighted composite score and return top N.
+    """
+    scored = scored.copy()
+    scored["factor_composite"] = (
+        factor_weights.get("momentum", 0) * scored.get("z_momentum", 0) +
+        factor_weights.get("quality", 0) * scored.get("z_quality", 0) +
+        factor_weights.get("value", 0) * scored.get("z_value", 0) +
+        factor_weights.get("low_vol", 0) * scored.get("z_low_vol", 0) +
+        factor_weights.get("yield", 0) * scored.get("z_yield", 0)
+    )
+
+    scored = scored.sort_values("factor_composite", ascending=False).head(top_n)
+    scored["rank"] = range(1, len(scored) + 1)
+
+    logger.info(f"Composite ranking: top {len(scored)} by weighted factor score")
+    return scored
+
+
+# ── Stage 3: Profile-Aware Fit Scoring ───────────────────────────────────────
+
+def compute_fit_scores(
+    candidates: pd.DataFrame,
+    goal: str = "Balanced",
+    risk_score: int = 50,
+    time_horizon_years: float = 7.0,
+) -> pd.DataFrame:
+    """
+    Stage 3: Score each candidate based on investor profile alignment.
+
+    Fit Score (0-100) components:
+      40pts — Goal alignment (factor composite using goal-specific weights)
+      30pts — Risk band match (volatility and beta vs. profile tolerance)
+      15pts — Horizon match (higher-vol assets penalized for short horizons)
+      10pts — Quality floor (Sharpe ratio threshold)
+       5pts — Diversification bonus (low correlation with typical Nasdaq portfolio)
+    """
+    candidates = candidates.copy()
+
+    # Risk band from risk_score
+    # Higher risk_score → tolerates higher vol and beta
+    max_vol_tolerance = 0.15 + (risk_score / 100) * 0.45    # 15% to 60%
+    max_beta_tolerance = 0.5 + (risk_score / 100) * 1.5     # 0.5 to 2.0
+
+    fit_scores = []
+    for _, row in candidates.iterrows():
+        score = 0
+
+        # ── Goal alignment (40 pts) ─────────────────────────────────────────
+        # Use the goal-specific factor weights to compute an aligned composite
+        goal_weights = FACTOR_WEIGHTS_BY_GOAL.get(goal, FACTOR_WEIGHTS_DEFAULT)
+        goal_composite = (
+            goal_weights.get("momentum", 0) * row.get("z_momentum", 0) +
+            goal_weights.get("quality", 0) * row.get("z_quality", 0) +
+            goal_weights.get("value", 0) * row.get("z_value", 0) +
+            goal_weights.get("low_vol", 0) * row.get("z_low_vol", 0) +
+            goal_weights.get("yield", 0) * row.get("z_yield", 0)
+        )
+        # Map z-score composite to 0-40 range (z of +2 = 40, z of -2 = 0)
+        score += max(0, min(40, (goal_composite + 2) * 10))
+
+        # ── Risk band match (30 pts) ────────────────────────────────────────
+        vol = abs(row.get("volatility", 0.20))
+        beta = abs(row.get("beta", 1.0))
+
+        if vol <= max_vol_tolerance and beta <= max_beta_tolerance:
+            score += 30
+        elif vol <= max_vol_tolerance * 1.3 and beta <= max_beta_tolerance * 1.3:
+            score += 15
+        else:
+            score += 5  # partial credit — asset exists on the spectrum
+
+        # ── Horizon match (15 pts) ──────────────────────────────────────────
+        # High-vol assets need longer horizons to smooth out
+        min_horizon_for_asset = 1 + vol * 15  # vol of 0.40 → needs ~7 year horizon
+        if time_horizon_years >= min_horizon_for_asset:
+            score += 15
+        elif time_horizon_years >= min_horizon_for_asset * 0.6:
+            score += 8
+        else:
+            score += 2
+
+        # ── Quality floor (10 pts) ──────────────────────────────────────────
+        sh = row.get("sharpe", 0)
+        if sh >= 1.0:
+            score += 10
+        elif sh >= 0.5:
+            score += 6
+        elif sh >= 0.2:
+            score += 3
+
+        # ── Diversification bonus (5 pts) ───────────────────────────────────
+        # Lower beta assets get a small bonus as they provide diversification
+        if beta < 0.5:
+            score += 5
+        elif beta < 0.8:
+            score += 3
+        elif beta < 1.0:
+            score += 1
+
+        fit_scores.append(min(100, round(score)))
+
+    candidates["fit_score"] = fit_scores
+
+    # Re-rank by fit score
+    candidates = candidates.sort_values("fit_score", ascending=False)
+    candidates["rank"] = range(1, len(candidates) + 1)
+
+    logger.info(f"Fit scoring complete: top score {candidates['fit_score'].max()}, "
+                f"median {candidates['fit_score'].median()}")
+    return candidates
+
+
+# ── Full Pipeline ────────────────────────────────────────────────────────────
+
+def run_screening_pipeline(
+    returns: pd.DataFrame,
+    goal: str = "Balanced",
+    risk_score: int = 50,
+    time_horizon_years: float = 7.0,
+    max_results: int = SCREEN_FINAL_SIZE,
+    tickers: list[str] | None = None,
+) -> ScreeningResult:
+    """
+    Run the full four-stage screening pipeline.
+
+    Args:
+        returns: Full return DataFrame (from data_ingest)
+        goal: Investor goal (Growth, Income, Preservation, Balanced)
+        risk_score: 0-100 risk score from profile
+        time_horizon_years: Investor time horizon
+        max_results: How many candidates to return
+        tickers: Optional custom ticker list (skips universe loading)
+
+    Returns:
+        ScreeningResult with ranked shortlist and pipeline metadata
+    """
+    # Stage 0: Load universe
+    if tickers is None:
+        tickers = load_nasdaq_tickers()
+    universe_size = len(tickers)
+    logger.info(f"Screening pipeline: {universe_size} tickers, goal={goal}, "
+                f"risk={risk_score}, horizon={time_horizon_years}yr")
+
+    # Stage 1: Fetch fundamentals and apply hard gates
+    fundamentals = fetch_fundamentals(tickers)
+    gated = apply_hard_gates(fundamentals)
+    passed_gates = len(gated)
+
+    if passed_gates < 5:
+        raise ValueError(f"Only {passed_gates} tickers passed hard gates — insufficient for screening")
+
+    # Stage 2: Factor scoring
+    goal_weights = FACTOR_WEIGHTS_BY_GOAL.get(goal, FACTOR_WEIGHTS_DEFAULT)
+    scored = compute_factor_scores(gated, returns)
+    ranked = rank_by_composite(scored, goal_weights, top_n=SCREEN_STAGE2_SIZE)
+    stage2_size = len(ranked)
+
+    # Stage 3: Profile-aware fit scoring
+    final = compute_fit_scores(ranked, goal, risk_score, time_horizon_years)
+    final = final.head(max_results)
+
+    # Build output
+    shortlist = []
+    for _, row in final.iterrows():
+        shortlist.append(ScreenedAsset(
+            ticker=row["ticker"],
+            name=row.get("name", row["ticker"]),
+            sector=row.get("sector", "Unknown"),
+            industry=row.get("industry", "Unknown"),
+            market_cap=row.get("market_cap", 0),
+            price=row.get("price", 0),
+            avg_volume=row.get("avg_volume", 0),
+            return_1y=round(float(row.get("return_1y", 0) * 100), 2),
+            return_6m=round(float(row.get("return_6m", 0) * 100), 2),
+            return_3m=round(float(row.get("return_3m", 0) * 100), 2),
+            volatility=round(float(row.get("volatility", 0) * 100), 2),
+            sharpe=round(float(row.get("sharpe", 0)), 3),
+            beta=round(float(row.get("beta", 1)), 3),
+            max_drawdown=round(float(row.get("max_drawdown", 0) * 100), 2),
+            dividend_yield=round(float(row.get("dividend_yield", 0)), 2),
+            pe_ratio=_safe_round(row.get("pe_ratio")),
+            forward_pe=_safe_round(row.get("forward_pe")),
+            pb_ratio=_safe_round(row.get("pb_ratio")),
+            earnings_yield=_safe_round(row.get("earnings_yield")),
+            z_momentum=round(float(row.get("z_momentum", 0)), 3),
+            z_quality=round(float(row.get("z_quality", 0)), 3),
+            z_value=round(float(row.get("z_value", 0)), 3),
+            z_low_vol=round(float(row.get("z_low_vol", 0)), 3),
+            z_yield=round(float(row.get("z_yield", 0)), 3),
+            factor_composite=round(float(row.get("factor_composite", 0)), 4),
+            fit_score=int(row.get("fit_score", 50)),
+            rank=int(row.get("rank", 0)),
+        ))
+
+    # Sector distribution
+    sector_dist = final.groupby("sector").size().to_dict() if "sector" in final.columns else {}
+
+    return ScreeningResult(
+        shortlist=shortlist,
+        universe_size=universe_size,
+        passed_gates=passed_gates,
+        stage2_size=stage2_size,
+        final_size=len(shortlist),
+        goal_used=goal,
+        factor_weights=goal_weights,
+        sector_distribution=sector_dist,
+    )
+
+
+def _safe_round(val, decimals=2):
+    """Round a value, returning None if input is None or NaN."""
+    if val is None:
+        return None
+    try:
+        import math
+        if math.isnan(val) or math.isinf(val):
+            return None
+        return round(float(val), decimals)
+    except (TypeError, ValueError):
+        return None
