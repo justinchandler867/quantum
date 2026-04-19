@@ -400,6 +400,7 @@ function scoreProfile(a){
 
 function fitScore(asset,profile){
   if(!profile)return 50;
+  if(!asset||!asset.goals||!asset.rb)return 50;
   let s=0;
   if(asset.goals.includes(profile.goal))s+=40;
   else if(asset.goals.some(g=>["Balanced","Growth"].includes(g))&&["Growth","Balanced"].includes(profile.goal))s+=20;
@@ -722,7 +723,9 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
               ["TICKER","NAME","TYPE","WT%","1Y RET","VOL","BETA","SHARPE","YIELD","FIT"].map(h=>e("th",{key:h,style:{padding:"3px 5px",textAlign:"left",fontSize:9,color:"#475569",fontWeight:"bold"}},h))
             )),
             e("tbody",null,tickers.map((k,i)=>{
-              const a=ASSETS.find(u=>u.id===k)||{};const fit=fitScore(a,profile);
+              const a=ASSETS.find(u=>u.id===k)||{};
+              if(!a.goals)console.warn("Quantex: orphan ticker in portfolio:",k);
+              const fit=fitScore(a,profile);
               return e("tr",{key:k,style:{borderBottom:"1px solid #06090f"}},
                 e("td",{style:{padding:"4px 5px",color:COLORS[i%COLORS.length],fontWeight:"bold"}},k),
                 e("td",{style:{padding:"4px 5px",color:"#64748b",maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},a.n),
