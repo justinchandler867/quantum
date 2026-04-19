@@ -1136,50 +1136,76 @@ async def strategy_payoff_endpoint(req: StrategyRequest):
 import yfinance as yf
 
 # ── AI Proxy Endpoint ────────────────────────────────────────────────────────
-# Proxies Claude API calls so users don't need their own API key.
-# Set ANTHROPIC_API_KEY env var on server. If not set, returns a helpful error.
+# Proxies Claude calls via Replicate so users don't need their own API key.
+# Set REPLICATE_API_TOKEN env var on server. If not set, returns a helpful error.
 
+import asyncio as _asyncio
 import os
 import httpx as _httpx
+
+REPLICATE_MODEL = "anthropic/claude-4.5-sonnet"
 
 @app.post("/api/ai/chat")
 async def ai_chat(body: dict):
     """
-    Proxy chat to Claude API using server-side key.
-    Frontend sends {message, context} — backend adds the API key.
+    Proxy chat to Claude via Replicate using server-side token.
+    Frontend sends {system, message} — backend adds the Replicate token.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        raise HTTPException(status_code=503, detail="AI features require an ANTHROPIC_API_KEY environment variable on the server. Set it in your Render dashboard under Environment.")
+    token = os.environ.get("REPLICATE_API_TOKEN", "")
+    if not token:
+        raise HTTPException(status_code=503, detail="AI features require a REPLICATE_API_TOKEN environment variable on the server. Set it in your Render dashboard under Environment.")
 
     system = body.get("system", "You are Quantex AI, a professional financial adviser assistant.")
     message = body.get("message", "")
     if not message:
         raise HTTPException(status_code=400, detail="Message is required")
 
+    url = f"https://api.replicate.com/v1/models/{REPLICATE_MODEL}/predictions"
+    auth_headers = {"Authorization": f"Bearer {token}"}
+    payload = {"input": {"prompt": message, "system_prompt": system, "max_tokens": 1024}}
+
+    def _extract_output(pred: dict) -> str:
+        out = pred.get("output")
+        if isinstance(out, list):
+            return "".join(out)
+        return "" if out is None else str(out)
+
     try:
-        async with _httpx.AsyncClient(timeout=30.0) as client:
+        async with _httpx.AsyncClient(timeout=75.0) as client:
             resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "Content-Type": "application/json",
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                },
-                json={
-                    "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 400,
-                    "system": system,
-                    "messages": [{"role": "user", "content": message}],
-                },
+                url,
+                headers={**auth_headers, "Content-Type": "application/json", "Prefer": "wait"},
+                json=payload,
             )
             data = resp.json()
-            if "error" in data:
-                raise HTTPException(status_code=502, detail=data["error"].get("message", "Claude API error"))
-            text = "".join(c.get("text", "") for c in data.get("content", []))
-            return {"response": text}
+            if resp.status_code >= 400:
+                logger.error("Replicate API error (status=%s): %s", resp.status_code, data)
+                raise HTTPException(status_code=502, detail=data.get("detail") or "Replicate API error")
+
+            status = data.get("status")
+            if status == "succeeded":
+                return {"response": _extract_output(data)}
+            if status == "failed":
+                logger.error("Replicate prediction failed: %s", data)
+                raise HTTPException(status_code=502, detail=data.get("error") or "Replicate prediction failed")
+
+            # Prefer: wait window exceeded — poll until terminal state.
+            poll_url = (data.get("urls") or {}).get("get")
+            if not poll_url:
+                logger.error("Replicate returned status=%s without poll URL: %s", status, data)
+                raise HTTPException(status_code=502, detail="Replicate response missing poll URL")
+            for _ in range(30):
+                await _asyncio.sleep(2)
+                pr = await client.get(poll_url, headers=auth_headers)
+                pd = pr.json()
+                if pd.get("status") == "succeeded":
+                    return {"response": _extract_output(pd)}
+                if pd.get("status") == "failed":
+                    logger.error("Replicate prediction failed on poll: %s", pd)
+                    raise HTTPException(status_code=502, detail=pd.get("error") or "Replicate prediction failed")
+            raise HTTPException(status_code=504, detail="Replicate prediction timed out")
     except _httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Claude API timed out")
+        raise HTTPException(status_code=504, detail="Replicate API timed out")
     except HTTPException:
         raise
     except Exception as exc:

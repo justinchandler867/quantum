@@ -190,7 +190,7 @@ body{font-family:'DM Sans',sans-serif;background:#0a0e1a;color:#c8d2e0;font-size
 .deriv-lbl{font-size:9px;font-weight:700;color:#6366f1;letter-spacing:.8px}
 .deriv-field{padding:8px 10px;background:rgba(10,14,26,.6);border:1px solid rgba(99,102,241,.12);border-radius:8px;color:#c8d2e0;font-size:12px;font-family:'JetBrains Mono',monospace;width:100%;transition:all .2s}
 .deriv-field:focus{outline:none;border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.12)}
-.greek-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.greek-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(52px,1fr));gap:6px}
 .greek-box{background:rgba(10,14,26,.5);border:1px solid rgba(99,102,241,.08);border-radius:8px;padding:8px;text-align:center;transition:all .2s}
 .greek-box:hover{border-color:rgba(99,102,241,.2);background:rgba(99,102,241,.04)}
 .greek-sym{font-size:15px;font-weight:700;background:linear-gradient(135deg,#818cf8,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
@@ -1086,22 +1086,16 @@ function Advisor({profile,ports,activePort}){
     setLoading(true);
     const sysPrompt="You are Quantex AI, a professional financial adviser assistant. Current investor context:\n"+getCtx()+"\n\nBe concise (under 200 words). Reference actual portfolio numbers when relevant. Note this is analytical guidance, not regulated financial advice. Plain text only, no markdown.";
     try{
-      // Try server proxy first (no API key needed)
-      if(BACKEND_URL||location.hostname!=="localhost"){
-        try{
-          const proxyResp=await fetch((BACKEND_URL||"")+"/api/ai/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:sysPrompt,message:msg})});
-          if(proxyResp.ok){const d=await proxyResp.json();setMsgs(m=>[...m,{r:"ai",t:d.response}]);setLoading(false);return;}
-        }catch(e){/* fall through to direct */}
-      }
-      // Fall back to direct API key
-      if(!apiKey){setMsgs(m=>[...m,{r:"ai",t:"AI features are available when either:\n• The server has an ANTHROPIC_API_KEY configured, or\n• You enter your own key via the ⚙ icon above.\n\nGet a key at console.anthropic.com"}]);setLoading(false);return;}
-      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,system:sysPrompt,messages:[{role:"user",content:msg}]})});
-      const data=await resp.json();
-      if(data.error)throw new Error(data.error.message||"API error");
-      const text=data.content?.map(c=>c.text||"").join("")||"Unable to get a response.";
-      setMsgs(m=>[...m,{r:"ai",t:text}]);
+      // Server proxy (Replicate-backed). Direct-API fallback was removed when the
+      // backend switched from direct Anthropic to Replicate — the ⚙ icon's
+      // user-supplied Anthropic key cannot authenticate against Replicate, so the
+      // fallback was Anthropic-specific and no longer applied.
+      const proxyResp=await fetch((BACKEND_URL||"")+"/api/ai/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:sysPrompt,message:msg})});
+      if(proxyResp.ok){const d=await proxyResp.json();setMsgs(m=>[...m,{r:"ai",t:d.response}]);setLoading(false);return;}
+      const detail=await proxyResp.text();
+      setMsgs(m=>[...m,{r:"ai",t:"AI features are currently unavailable (HTTP "+proxyResp.status+"). "+detail}]);
     }catch(err){
-      setMsgs(m=>[...m,{r:"ai",t:"Error: "+err.message+"\n\nTry entering your API key via ⚙ above."}]);
+      setMsgs(m=>[...m,{r:"ai",t:"Error: "+err.message}]);
     }finally{setLoading(false);}
   };
 
