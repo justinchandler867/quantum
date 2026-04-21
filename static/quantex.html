@@ -246,11 +246,15 @@ body{font-family:'DM Sans',sans-serif;background:#0a0e1a;color:#c8d2e0;font-size
 .login-divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:#4a5568;font-size:11px}
 .login-divider::before,.login-divider::after{content:'';flex:1;height:1px;background:rgba(99,102,241,.1)}
 /* Landing Page */
-.landing-wrap{min-height:100vh;background:linear-gradient(135deg,#0a0e1a 0%,#0f1424 50%,#0a0e1a 100%);display:flex;justify-content:center;padding:48px 24px}
+.landing-wrap{min-height:100vh;background:linear-gradient(135deg,#0a0e1a 0%,#0f1424 50%,#0a0e1a 100%);display:flex;justify-content:center;padding:48px 24px;position:relative}
 .landing-container{max-width:1100px;width:100%;display:flex;flex-direction:column;gap:40px;align-items:center}
 .landing-hero{text-align:center;padding:24px 0 8px}
-.landing-headline{font-family:'Outfit',sans-serif;font-size:38px;font-weight:800;color:#f1f5f9;line-height:1.15;margin-bottom:16px;letter-spacing:-.5px}
+.landing-brand{font-family:'Outfit',sans-serif;font-size:64px;font-weight:800;line-height:1;margin-bottom:16px;background:linear-gradient(135deg,#818cf8,#6366f1,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-1px}
+.landing-headline{font-family:'Outfit',sans-serif;font-size:28px;font-weight:700;color:#f1f5f9;line-height:1.2;margin-bottom:10px;letter-spacing:-.3px}
+.landing-tag{font-size:16px;color:#94a3b8;line-height:1.5}
 .landing-sub{font-size:17px;color:#94a3b8;line-height:1.6;max-width:680px;margin:0 auto}
+.landing-signin-topright{position:absolute;top:20px;right:24px;background:none;border:none;color:#94a3b8;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif;padding:6px 12px;border-radius:6px;transition:color .2s}
+.landing-signin-topright:hover{color:#a5b4fc}
 .landing-cards{display:flex;gap:18px;width:100%}
 .value-card{flex:1;background:#0b0f1e;border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:22px}
 .value-icon{font-size:28px;margin-bottom:12px}
@@ -2271,6 +2275,19 @@ function LoginGate({children}){
   const[email,setEmail]=useState("");
   const[pass,setPass]=useState("");
   const[mode,setMode]=useState("login"); // login, signup, guest
+  const[showForm,setShowForm]=useState(false);
+
+  useEffect(()=>{
+    if(!showForm)return;
+    const h=ev=>{if(ev.key==="Escape")setShowForm(false);};
+    const prev=document.body.style.overflow;
+    document.body.style.overflow="hidden";
+    document.addEventListener("keydown",h);
+    return()=>{
+      document.body.style.overflow=prev;
+      document.removeEventListener("keydown",h);
+    };
+  },[showForm]);
 
   const save=(u)=>{localStorage.setItem("qx_user",JSON.stringify(u));setUser(u);};
 
@@ -2283,49 +2300,57 @@ function LoginGate({children}){
   };
   const guest=()=>save({name:"Guest",email:"guest@quantex.app",joined:new Date().toISOString(),plan:"guest"});
 
-  return e("div",{className:"landing-wrap"},
-    e("div",{className:"landing-container"},
-      e("div",{className:"landing-hero"},
-        e("div",{className:"landing-headline"},"Portfolio analysis with driver modes"),
-        e("div",{className:"landing-sub"},"From plain-English explanations to CFA-grade depth")
-      ),
-      e("div",{className:"landing-cards"},
-        e("div",{className:"value-card"},
-          e("div",{className:"value-icon"},"🟢"),
-          e("div",{className:"value-title"},"Beginner Mode"),
-          e("div",{className:"value-body"},"Guided portfolio analysis in plain language. Learn what your numbers mean without a finance degree.")
+  return e(React.Fragment,null,
+    e("div",{className:"landing-wrap"},
+      e("button",{className:"landing-signin-topright",onClick:()=>{setMode("login");setShowForm(true);}},"Sign in"),
+      e("div",{className:"landing-container"},
+        e("div",{className:"landing-hero"},
+          e("div",{className:"landing-brand"},"Quantex"),
+          e("div",{className:"landing-headline"},"Portfolio analysis with driver modes"),
+          e("div",{className:"landing-tag"},"CFA exam prep with an AI professor built in")
         ),
-        e("div",{className:"value-card"},
-          e("div",{className:"value-icon"},"🟡"),
-          e("div",{className:"value-title"},"Track Mode"),
-          e("div",{className:"value-body"},"Real portfolio tools — correlations, optimization, risk metrics — with explanations tied to CFA curriculum.")
+        e("div",{className:"landing-cards"},
+          e("div",{className:"value-card"},
+            e("div",{className:"value-icon"},"🟢"),
+            e("div",{className:"value-title"},"Beginner Mode"),
+            e("div",{className:"value-body"},"Guided portfolio analysis in plain language. Learn what your numbers mean without a finance degree.")
+          ),
+          e("div",{className:"value-card"},
+            e("div",{className:"value-icon"},"🟡"),
+            e("div",{className:"value-title"},"Track Mode"),
+            e("div",{className:"value-body"},"Real portfolio tools — correlations, optimization, risk metrics — with explanations tied to CFA curriculum.")
+          ),
+          e("div",{className:"value-card"},
+            e("div",{className:"value-icon"},"🔴"),
+            e("div",{className:"value-title"},"Full Pro Mode"),
+            e("div",{className:"value-body"},"Professional analysis: Ledoit-Wolf shrinkage, stress testing, efficient frontiers, technical indicators. Full depth on demand.")
+          )
         ),
-        e("div",{className:"value-card"},
-          e("div",{className:"value-icon"},"🔴"),
-          e("div",{className:"value-title"},"Full Pro Mode"),
-          e("div",{className:"value-body"},"Professional analysis: Ledoit-Wolf shrinkage, stress testing, efficient frontiers, technical indicators. Full depth on demand.")
+        e("div",{className:"landing-cta"},
+          e("button",{className:"landing-signup-btn",onClick:()=>{setMode("signup");setShowForm(true);}},"Sign Up Free"),
+          e("button",{className:"landing-guest-link",onClick:guest},"Try as guest first")
+        ),
+        e("div",{className:"landing-footer"},"Quantex — educational tool, not investment advice")
+      )
+    ),
+    showForm&&e("div",{onClick:()=>setShowForm(false),style:{position:"fixed",inset:0,background:"rgba(0,0,0,.72)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+      e("div",{onClick:ev=>ev.stopPropagation(),style:{position:"relative"}},
+        e("button",{onClick:()=>setShowForm(false),title:"Close (Esc)",style:{position:"absolute",top:10,right:12,background:"none",border:"none",color:"#94a3b8",fontSize:20,cursor:"pointer",padding:"2px 8px",lineHeight:1,zIndex:2}},"✕"),
+        e("div",{className:"login-card"},
+          e("div",{className:"login-logo"},"QUANTEX"),
+          e("div",{className:"login-sub"},"Portfolio Intelligence Platform",e("br",null),"CFA Exam Prep · Paper Trading · AI Advisory"),
+          mode==="signup"&&e("input",{className:"login-field",placeholder:"Full Name",value:name,onChange:ev=>setName(ev.target.value)}),
+          e("input",{className:"login-field",placeholder:"Email",type:"email",value:email,onChange:ev=>setEmail(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&submit()}),
+          e("input",{className:"login-field",placeholder:"Password",type:"password",value:pass,onChange:ev=>setPass(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&submit()}),
+          e("button",{className:"login-btn",onClick:submit},mode==="signup"?"Create Account":"Sign In"),
+          e("div",{style:{textAlign:"center",marginTop:10}},
+            e("button",{style:{background:"none",border:"none",color:"#6366f1",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"},onClick:()=>setMode(mode==="signup"?"login":"signup")},mode==="signup"?"Already have an account? Sign in":"Don't have an account? Sign up")
+          ),
+          e("div",{className:"login-divider"},"or"),
+          e("button",{style:{width:"100%",padding:11,background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.15)",borderRadius:10,color:"#a5b4fc",fontSize:12,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600},onClick:guest},"Continue as Guest"),
+          e("div",{style:{textAlign:"center",marginTop:14,fontSize:10,color:"#4a5568",lineHeight:1.6}},"Free tier · No credit card required",e("br",null),"Progress saves locally on this device")
         )
-      ),
-      e("div",{className:"landing-cta"},
-        e("button",{className:"landing-signup-btn",onClick:()=>setMode("signup")},"Sign Up Free"),
-        e("button",{className:"landing-guest-link",onClick:guest},"Try as guest first"),
-        e("button",{className:"landing-signin-link",onClick:()=>setMode("login")},"Already have an account? Sign in")
-      ),
-      e("div",{className:"login-card"},
-        e("div",{className:"login-logo"},"QUANTEX"),
-        e("div",{className:"login-sub"},"Portfolio Intelligence Platform",e("br",null),"CFA Exam Prep · Paper Trading · AI Advisory"),
-        mode==="signup"&&e("input",{className:"login-field",placeholder:"Full Name",value:name,onChange:ev=>setName(ev.target.value)}),
-        e("input",{className:"login-field",placeholder:"Email",type:"email",value:email,onChange:ev=>setEmail(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&submit()}),
-        e("input",{className:"login-field",placeholder:"Password",type:"password",value:pass,onChange:ev=>setPass(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&submit()}),
-        e("button",{className:"login-btn",onClick:submit},mode==="signup"?"Create Account":"Sign In"),
-        e("div",{style:{textAlign:"center",marginTop:10}},
-          e("button",{style:{background:"none",border:"none",color:"#6366f1",cursor:"pointer",fontSize:11,fontFamily:"'DM Sans',sans-serif"},onClick:()=>setMode(mode==="signup"?"login":"signup")},mode==="signup"?"Already have an account? Sign in":"Don't have an account? Sign up")
-        ),
-        e("div",{className:"login-divider"},"or"),
-        e("button",{style:{width:"100%",padding:11,background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.15)",borderRadius:10,color:"#a5b4fc",fontSize:12,cursor:"pointer",fontFamily:"'DM Sans',sans-serif",fontWeight:600},onClick:guest},"Continue as Guest"),
-        e("div",{style:{textAlign:"center",marginTop:14,fontSize:10,color:"#4a5568",lineHeight:1.6}},"Free tier · No credit card required",e("br",null),"Progress saves locally on this device")
-      ),
-      e("div",{className:"landing-footer"},"Quantex — educational tool, not investment advice")
+      )
     )
   );
 }
