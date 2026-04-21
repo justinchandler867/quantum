@@ -415,3 +415,48 @@ class PricesResponse(BaseModel):
     end_date: str
     skipped: list[str] = Field(default_factory=list, description="Requested tickers with no price data")
     volume: dict[str, list[float]] | None = None
+
+
+# ── Search / Ticker Add Models ───────────────────────────────────────────────
+
+class SearchRequest(BaseModel):
+    q: str = Field(..., min_length=1, max_length=50)
+
+
+class SearchResult(BaseModel):
+    symbol: str
+    name: str
+    exchange: str
+    in_universe: bool
+
+
+class TickerAddRequest(BaseModel):
+    symbol: str = Field(..., min_length=1, max_length=10)
+
+
+class TickerAddResponse(BaseModel):
+    id: str
+    n: str
+    t: str = "Stock"
+    sec: str = "Unknown"
+    ret: float = 0.0
+    vol: float = 20.0
+    beta: float = 1.0
+    sh: float = 0.0
+    yld: float = 0.0
+    sig: str = "Hold"
+    rsi: float | None = None
+    macd: str | None = None
+    tgt: float | None = None
+    stop: float | None = None
+    goals: list[str] = Field(default_factory=list)
+    rb: list[int] = Field(default_factory=lambda: [1, 5])
+    hm: int = 3
+    s08: float = 0.0
+    s20: float = 0.0
+    s22: float = 0.0
+    fit: int = 50
+    pe: float | None = None
+    fpe: float | None = None
+    mktCap: float | None = None
+    maxDD: float = 0.0

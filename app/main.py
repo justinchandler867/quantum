@@ -2,6 +2,7 @@
 Quantex Backend — FastAPI Application
 Correlation, covariance, and diagnostics API endpoints.
 """
+import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -16,6 +17,7 @@ from app.config import (
     CACHE_TTL_WEEKLY,
     DEFAULT_LAMBDA,
     REFERENCE_HEDGES,
+    RISK_FREE_RATE,
 )
 from app.models import (
     CorrelationRequest,
@@ -52,6 +54,10 @@ from app.models import (
     ReferenceHedgeInfo,
     PricesRequest,
     PricesResponse,
+    SearchRequest,
+    SearchResult,
+    TickerAddRequest,
+    TickerAddResponse,
 )
 from app.data_ingest import (
     fetch_prices,
@@ -444,6 +450,172 @@ async def get_prices(req: PricesRequest):
         end_date=sliced.index[-1].strftime("%Y-%m-%d"),
         skipped=skipped,
         volume=volume_out,
+    )
+
+    cache_set(ck, response.model_dump(), CACHE_TTL_DAILY)
+    return response
+
+
+# ── Ticker Search + On-Demand Add ────────────────────────────────────────────
+
+_TICKERS_PATH = Path(__file__).parent / "data" / "tickers.json"
+try:
+    with open(_TICKERS_PATH) as _f:
+        _TICKERS = json.load(_f)
+    logger.info(f"Loaded {len(_TICKERS)} tickers from {_TICKERS_PATH.name}")
+except (FileNotFoundError, json.JSONDecodeError) as _exc:
+    logger.warning(f"Could not load tickers.json ({_exc}); search will return empty")
+    _TICKERS = []
+
+
+@app.post("/api/search", response_model=list[SearchResult])
+async def search_tickers(req: SearchRequest):
+    """Substring search across NASDAQ/NYSE universe. Top 20 matches, ranked by
+    exact-symbol > symbol-prefix > name-contains."""
+    q = req.q.strip().lower()
+    if not q:
+        return []
+
+    ck = cache_key("search", [q])
+    cached = cache_get(ck)
+    if cached is not None:
+        # in_universe may be stale but daily TTL is acceptable
+        return [SearchResult(**r) for r in cached]
+
+    exact, prefix, contains = [], [], []
+    for r in _TICKERS:
+        sym_l = r["symbol"].lower()
+        if sym_l == q:
+            exact.append(r)
+        elif sym_l.startswith(q):
+            prefix.append(r)
+        elif q in r["name"].lower():
+            contains.append(r)
+
+    exact.sort(key=lambda x: x["symbol"])
+    prefix.sort(key=lambda x: x["symbol"])
+    contains.sort(key=lambda x: x["symbol"])
+    ranked = (exact + prefix + contains)[:20]
+
+    universe: set[str] = set()
+    if _store["returns"] is not None:
+        universe = set(_store["returns"].columns)
+
+    results = [
+        SearchResult(
+            symbol=r["symbol"],
+            name=r["name"],
+            exchange=r["exchange"],
+            in_universe=r["symbol"] in universe,
+        )
+        for r in ranked
+    ]
+
+    cache_set(ck, [r.model_dump() for r in results], CACHE_TTL_DAILY)
+    return results
+
+
+@app.post("/api/ticker/add", response_model=TickerAddResponse)
+async def add_ticker(req: TickerAddRequest):
+    """Fetch a single ticker via yfinance. Lenient validation — accepts any symbol
+    so mutual funds (VTSAX etc.) and other securities not in tickers.json still work."""
+    symbol = req.symbol.strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=422, detail="Empty symbol")
+
+    ck = cache_key("ticker_add", [symbol])
+    cached = cache_get(ck)
+    if cached is not None:
+        return TickerAddResponse(**cached)
+
+    import yfinance as yf
+
+    try:
+        t = yf.Ticker(symbol)
+        hist = t.history(period="1y")
+    except Exception as exc:
+        logger.error(f"yfinance history({symbol}) failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Fetch failed for {symbol}: {exc}")
+
+    if hist is None or hist.empty or "Close" not in hist.columns:
+        raise HTTPException(status_code=502, detail=f"No price history returned for {symbol}")
+
+    closes = hist["Close"].dropna()
+    if len(closes) < 20:
+        raise HTTPException(status_code=422, detail=f"Insufficient history for {symbol}: {len(closes)} days")
+
+    ret_1y = float((closes.iloc[-1] / closes.iloc[0] - 1.0) * 100)
+    returns = np.log(closes / closes.shift(1)).dropna()
+    ann_vol = float(returns.std() * np.sqrt(252) * 100)
+
+    beta = 1.0
+    if _store["returns"] is not None and "QQQ" in _store["returns"].columns:
+        qqq_ret = _store["returns"]["QQQ"]
+        common_idx = returns.index.intersection(qqq_ret.index)
+        if len(common_idx) > 30:
+            r1 = returns.loc[common_idx].values
+            r2 = qqq_ret.loc[common_idx].values
+            var_qqq = float(np.var(r2))
+            if var_qqq > 0:
+                beta = float(np.cov(r1, r2)[0, 1] / var_qqq)
+
+    rf_pct = RISK_FREE_RATE * 100
+    sharpe = float((ret_1y - rf_pct) / ann_vol) if ann_vol > 0 else 0.0
+
+    cum = (1.0 + returns).cumprod()
+    rolling_max = cum.cummax()
+    drawdown = (cum - rolling_max) / rolling_max
+    max_dd = float(drawdown.min() * 100) if len(drawdown) > 0 else 0.0
+
+    info: dict = {}
+    try:
+        info = t.info or {}
+    except Exception as exc:
+        logger.debug(f"yfinance info({symbol}) failed: {exc}")
+
+    sector = info.get("sector") or info.get("quoteType") or "Unknown"
+    name = info.get("longName") or info.get("shortName") or symbol
+    div_yield = info.get("dividendYield") or 0
+    try:
+        div_yield = float(div_yield)
+    except (TypeError, ValueError):
+        div_yield = 0.0
+    if div_yield > 25:
+        div_yield = div_yield / 100
+
+    pe = info.get("trailingPE")
+    fpe = info.get("forwardPE")
+    mkt_cap = info.get("marketCap")
+    quote_type = (info.get("quoteType") or "").upper()
+    t_type = "ETF" if quote_type == "ETF" else "Mutual Fund" if quote_type == "MUTUALFUND" else "Stock"
+
+    if sharpe >= 1.5:
+        sig = "Strong Buy"
+    elif sharpe >= 1.0:
+        sig = "Buy"
+    elif sharpe >= 0.5:
+        sig = "Hold"
+    else:
+        sig = "Sell"
+
+    response = TickerAddResponse(
+        id=symbol,
+        n=name,
+        t=t_type,
+        sec=sector,
+        ret=round(ret_1y, 2),
+        vol=round(ann_vol, 2),
+        beta=round(beta, 2),
+        sh=round(sharpe, 2),
+        yld=round(div_yield, 2),
+        sig=sig,
+        goals=[], rb=[1, 5], hm=3,
+        s08=0.0, s20=0.0, s22=0.0,
+        fit=50,
+        pe=float(pe) if pe else None,
+        fpe=float(fpe) if fpe else None,
+        mktCap=float(mkt_cap) if mkt_cap else None,
+        maxDD=round(max_dd, 2),
     )
 
     cache_set(ck, response.model_dump(), CACHE_TTL_DAILY)
