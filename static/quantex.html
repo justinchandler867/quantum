@@ -2788,6 +2788,10 @@ function App({user,logout}){
   const onDone=p=>{setProfile(p);setTab("disco");};
   const addToPort=(pn,id)=>{setPorts(prev=>{const w={...prev[pn]};if(w[id]!==undefined)return prev;const n=Object.keys(w).length+1;const each=Math.floor(100/n);const nw={};Object.keys(w).forEach(k=>nw[k]=each);nw[id]=each;nw[Object.keys(nw)[0]]+=100-each*n;return{...prev,[pn]:nw};});};
   const rmFromPort=(pn,id)=>{setPorts(prev=>{const nw={...prev[pn]};delete nw[id];const ks=Object.keys(nw);if(ks.length>0){const each=Math.floor(100/ks.length);ks.forEach(k=>nw[k]=each);nw[ks[0]]+=100-each*ks.length;}return{...prev,[pn]:nw};});};
+  const togglePort=(pn,id)=>{
+    if(ports[pn]&&ports[pn][id]!==undefined)rmFromPort(pn,id);
+    else addToPort(pn,id);
+  };
   const updateW=(pn,id,v)=>setPorts(prev=>({...prev,[pn]:{...prev[pn],[id]:v}}));
 
   // Optimizer: try backend (SLSQP), fall back to local Monte Carlo
@@ -2845,7 +2849,7 @@ function App({user,logout}){
       e("div",{className:"main"},
         screenError&&tab==="disco"&&e("div",{className:"warn-box",style:{margin:"0 0 10px"}},"⚠ Backend: "+screenError+" — showing sample data. Start the backend with: uvicorn app.main:app"),
         tab==="onboard"&&e(Onboard,{onDone}),
-        tab==="disco"&&e(Discovery,{profile,ports,onAdd:addToPort}),
+        tab==="disco"&&e(Discovery,{profile,ports,onAdd:togglePort}),
         tab==="metrics"&&e(Metrics,{weights:aw}),
         tab==="corr"&&e(Correlations,{weights:aw,profile,backendOk}),
         tab==="frontier"&&e(Frontier,{weights:aw,profile,backendOk}),
