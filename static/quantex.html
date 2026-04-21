@@ -103,6 +103,20 @@ body{font-family:'DM Sans',sans-serif;background:#0a0e1a;color:#c8d2e0;font-size
 .type-tab.active{background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;border-color:transparent;box-shadow:0 2px 8px rgba(99,102,241,.3)}
 .search-input{padding:8px 12px;background:rgba(15,20,40,.6);border:1px solid rgba(99,102,241,.1);border-radius:8px;color:#c8d2e0;font-size:12px;font-family:'DM Sans',sans-serif;width:100%;outline:none;transition:all .2s}
 .search-input:focus{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.12)}
+.search-wrap{position:relative}
+.search-dropdown{position:absolute;top:100%;left:0;right:0;background:#0b0f1e;border:1px solid rgba(99,102,241,.15);border-radius:10px;margin-top:4px;max-height:360px;overflow-y:auto;z-index:500;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.search-dd-item{padding:8px 12px;display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;border-bottom:1px solid rgba(99,102,241,.05)}
+.search-dd-item:last-child{border-bottom:none}
+.search-dd-item:hover{background:rgba(99,102,241,.08)}
+.search-dd-sym{font-family:'JetBrains Mono',monospace;font-weight:700;color:#a5b4fc;min-width:64px}
+.search-dd-name{color:#94a3b8;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.search-dd-exch{font-size:9px;padding:2px 6px;background:rgba(99,102,241,.1);color:#818cf8;border-radius:4px;flex-shrink:0}
+.search-dd-fetch{font-size:10px;color:#34d399;flex-shrink:0}
+.search-dd-custom{background:rgba(99,102,241,.04);border-top:1px solid rgba(99,102,241,.1)}
+.search-dd-custom:hover{background:rgba(99,102,241,.10)}
+.search-dd-empty{padding:14px;color:#64748b;text-align:center;font-size:11px}
+.search-dd-loading{color:#818cf8;font-size:11px;padding:10px 12px}
+.search-dd-error{background:rgba(239,68,68,.08);color:#fca5a5;font-size:11px;padding:10px 12px;cursor:default}
 .tbl-wrap{overflow-x:auto;overflow-y:auto;max-height:460px;border:1px solid rgba(99,102,241,.08);border-radius:10px}
 .dtbl{width:100%;border-collapse:collapse;font-size:12px}
 .dtbl th{font-size:9px;font-weight:700;color:#6366f1;padding:8px 10px;border-bottom:1px solid rgba(99,102,241,.1);text-align:left;white-space:nowrap;cursor:pointer;background:rgba(15,20,40,.8);position:sticky;top:0;letter-spacing:.5px;backdrop-filter:blur(8px)}
@@ -630,6 +644,58 @@ function Discovery({profile,ports,onAdd}){
   const[sk,setSk]=useState("fit");
   const[sd,setSd]=useState(-1);
   const[openTicker,setOpenTicker]=useState(null);
+  const[searchResults,setSearchResults]=useState(null);
+  const[searchLoading,setSearchLoading]=useState(false);
+  const[addingTicker,setAddingTicker]=useState(null);
+  const[addError,setAddError]=useState(null);
+  const searchRef=useRef(null);
+  const skipNextSearch=useRef(false);
+
+  useEffect(()=>{
+    if(skipNextSearch.current){skipNextSearch.current=false;return;}
+    const q=search.trim();
+    if(q.length<1){setSearchResults(null);setAddError(null);return;}
+    let cancelled=false;
+    setSearchLoading(true);
+    const t=setTimeout(()=>{
+      apiFetch("/api/search",{q})
+        .then(d=>{if(!cancelled)setSearchResults(d);})
+        .catch(()=>{if(!cancelled)setSearchResults([]);})
+        .finally(()=>{if(!cancelled)setSearchLoading(false);});
+    },250);
+    return()=>{cancelled=true;clearTimeout(t);};
+  },[search]);
+
+  useEffect(()=>{
+    const onDoc=ev=>{if(searchRef.current&&!searchRef.current.contains(ev.target)){setSearchResults(null);setAddError(null);}};
+    const onKey=ev=>{if(ev.key==="Escape"){setSearchResults(null);setAddError(null);}};
+    document.addEventListener("mousedown",onDoc);
+    document.addEventListener("keydown",onKey);
+    return()=>{document.removeEventListener("mousedown",onDoc);document.removeEventListener("keydown",onKey);};
+  },[]);
+
+  const fetchTicker=async sym=>{
+    setAddingTicker(sym);setAddError(null);
+    try{
+      const d=await apiFetch("/api/ticker/add",{symbol:sym});
+      ASSETS=[...ASSETS,d];
+      skipNextSearch.current=true;
+      setSearch(sym);
+      setSearchResults(null);
+    }catch(e){
+      setAddError(sym+" fetch failed — "+(e.message||"unknown error"));
+    }finally{setAddingTicker(null);}
+  };
+  const onPickResult=r=>{
+    if(r.in_universe){
+      skipNextSearch.current=true;
+      setSearch(r.symbol);
+      setSearchResults(null);
+    }else{
+      fetchTicker(r.symbol);
+    }
+  };
+
   const defaultWeights={Growth:{momentum:.35,quality:.25,value:.15,low_vol:.10,yield:.15},Income:{momentum:.10,quality:.20,value:.15,low_vol:.20,yield:.35},Preservation:{momentum:.10,quality:.25,value:.15,low_vol:.35,yield:.15},Balanced:{momentum:.20,quality:.25,value:.20,low_vol:.20,yield:.15}};
   const[factorW,setFactorW]=useState(defaultWeights[profile?.goal]||defaultWeights.Balanced);
   const[showFactors,setShowFactors]=useState(false);
@@ -665,7 +731,28 @@ function Discovery({profile,ports,onAdd}){
       ),
       showFactors&&e(FactorSliders,{weights:factorW,onChange:setFactorW,goal:profile?.goal||"Balanced"}),
       e("div",{className:"type-tabs"},TYPES.map(tp=>e("button",{key:tp,className:"type-tab"+(tf===tp?" active":""),onClick:()=>setTf(tp)},tp))),
-      e("input",{className:"search-input",placeholder:"Search ticker or name...",value:search,onChange:ev=>setSearch(ev.target.value)})
+      e("div",{ref:searchRef,className:"search-wrap"},
+        e("input",{className:"search-input",placeholder:"Search ticker or name...",value:search,onChange:ev=>setSearch(ev.target.value)}),
+        (searchResults!==null||addingTicker||addError)&&e("div",{className:"search-dropdown"},
+          searchLoading&&e("div",{className:"search-dd-loading"},e("span",{className:"spin"},"◌")," Searching..."),
+          !searchLoading&&searchResults&&searchResults.length===0&&e("div",{className:"search-dd-empty"},"No matches in NASDAQ/NYSE universe"),
+          !searchLoading&&searchResults&&searchResults.map(r=>
+            e("div",{key:r.symbol,className:"search-dd-item",onClick:()=>onPickResult(r)},
+              e("span",{className:"search-dd-sym"},r.symbol),
+              e("span",{className:"search-dd-name"},r.name),
+              e("span",{className:"search-dd-exch"},r.exchange),
+              e("span",{className:"search-dd-fetch"},r.in_universe?"Filter →":"Fetch →")
+            )
+          ),
+          search.trim()&&!searchLoading&&!addingTicker&&e("div",{key:"__custom",className:"search-dd-item search-dd-custom",onClick:()=>fetchTicker(search.trim().toUpperCase())},
+            e("span",{className:"search-dd-sym"},"+"),
+            e("span",{className:"search-dd-name"},"Add custom ticker: ",e("span",{style:{color:"#a5b4fc",fontWeight:"bold"}},search.trim().toUpperCase())),
+            e("span",{className:"search-dd-fetch"},"Fetch →")
+          ),
+          addingTicker&&e("div",{className:"search-dd-loading"},e("span",{className:"spin"},"◌")," Fetching ",addingTicker,"..."),
+          addError&&e("div",{className:"search-dd-error"},"⚠ ",addError)
+        )
+      )
     ),
     e("div",{className:"tbl-wrap"},
       e("table",{className:"dtbl"},
