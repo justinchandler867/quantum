@@ -398,3 +398,18 @@ class StrategyRequest(BaseModel):
     put_strike: float | None = None
     upper_strike: float | None = None
     lower_strike: float | None = None
+
+
+# ── Prices Models ────────────────────────────────────────────────────────────
+
+class PricesRequest(BaseModel):
+    tickers: list[str] = Field(..., min_length=1, max_length=50)
+    range: str = Field("1Y", pattern="^(1W|1M|1Q|1Y|3Y|5Y|common)$")
+
+
+class PricesResponse(BaseModel):
+    dates: list[str]
+    prices: dict[str, list[float]]
+    start_date: str
+    end_date: str
+    skipped: list[str] = Field(default_factory=list, description="Requested tickers with no price data")

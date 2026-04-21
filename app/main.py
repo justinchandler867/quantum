@@ -50,6 +50,8 @@ from app.models import (
     StrategyRequest,
     PairInfo,
     ReferenceHedgeInfo,
+    PricesRequest,
+    PricesResponse,
 )
 from app.data_ingest import (
     fetch_prices,
@@ -378,6 +380,64 @@ async def refresh_data():
     _store["stress_returns"] = None
     _store["stress_mask"] = None
     return {"status": "cleared", "message": "Next request will reload data"}
+
+
+# ── Prices Endpoint ──────────────────────────────────────────────────────────
+
+_RANGE_TRADING_DAYS = {
+    "1W": 5, "1M": 21, "1Q": 63, "1Y": 252, "3Y": 756, "5Y": None,
+}
+
+
+@app.post("/api/prices", response_model=PricesResponse)
+async def get_prices(req: PricesRequest):
+    """
+    Return historical close prices for the requested tickers, aligned to
+    shared dates. Wide format: one array per ticker, all indexed by `dates`.
+    Tickers with no price data are reported in `skipped`, not erroring.
+    """
+    ck = cache_key("prices", req.tickers, range=req.range)
+    cached = cache_get(ck)
+    if cached:
+        return PricesResponse(**cached)
+
+    _ensure_data(req.tickers)
+    prices_df = _store["prices"]
+
+    available = [t for t in req.tickers if t in prices_df.columns]
+    skipped = [t for t in req.tickers if t not in prices_df.columns]
+
+    if not available:
+        raise HTTPException(
+            status_code=422,
+            detail=f"None of the requested tickers have price data: {req.tickers}",
+        )
+
+    sliced = prices_df[available]
+
+    if req.range == "common":
+        sliced = sliced.dropna()
+    else:
+        days = _RANGE_TRADING_DAYS[req.range]
+        if days is not None:
+            sliced = sliced.tail(days)
+
+    if sliced.empty:
+        raise HTTPException(
+            status_code=422,
+            detail="No overlapping price data for requested tickers in this range",
+        )
+
+    response = PricesResponse(
+        dates=[d.strftime("%Y-%m-%d") for d in sliced.index],
+        prices={t: sliced[t].tolist() for t in available},
+        start_date=sliced.index[0].strftime("%Y-%m-%d"),
+        end_date=sliced.index[-1].strftime("%Y-%m-%d"),
+        skipped=skipped,
+    )
+
+    cache_set(ck, response.model_dump(), CACHE_TTL_DAILY)
+    return response
 
 
 # ── Optimizer Endpoints ──────────────────────────────────────────────────────
