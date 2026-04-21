@@ -747,6 +747,47 @@ function vwap(prices,volumes,period=20){
 }
 function polylinePoints(arr,cx,cy){const pts=[];for(let i=0;i<arr.length;i++)if(arr[i]!==undefined)pts.push(cx(i)+","+cy(arr[i]));return pts.join(" ");}
 
+// Axis tick helpers
+const MONTH_ABBR=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DOW_ABBR=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+function formatDateTick(dateStr,range){
+  const d=new Date(dateStr);
+  if(range==="1W")return DOW_ABBR[d.getUTCDay()];
+  if(range==="1M")return MONTH_ABBR[d.getUTCMonth()]+" "+d.getUTCDate();
+  if(range==="1Q"||range==="1Y")return MONTH_ABBR[d.getUTCMonth()];
+  return String(d.getUTCFullYear());
+}
+function niceStep(rng,targetCount){
+  if(rng<=0)return 1;
+  const rough=rng/targetCount;
+  const mag=Math.pow(10,Math.floor(Math.log10(rough)));
+  const norm=rough/mag;
+  let nice;
+  if(norm<1.5)nice=1;
+  else if(norm<3)nice=2;
+  else if(norm<7)nice=5;
+  else nice=10;
+  return nice*mag;
+}
+function niceTicks(min,max,target=5){
+  const step=niceStep(max-min,target);
+  const first=Math.ceil(min/step)*step;
+  const ticks=[];
+  for(let v=first;v<=max+step*1e-6;v+=step)ticks.push(v);
+  return ticks;
+}
+function fmtPrice(v){
+  if(v<10)return "$"+v.toFixed(2);
+  if(v<1000)return "$"+Math.round(v);
+  return "$"+(v/1000).toFixed(1)+"k";
+}
+function xTickIndices(n,target=6){
+  if(n<=target)return Array.from({length:n},(_,i)=>i);
+  const out=[];
+  for(let i=0;i<target;i++)out.push(Math.round(i*(n-1)/(target-1)));
+  return out;
+}
+
 // ── Single-Ticker Chart Modal (Discovery row click) ──────────────────────────
 function TickerChart({ticker,name,onClose}){
   const[range,setRange]=useState("1Y");
@@ -858,7 +899,7 @@ function TickerChart({ticker,name,onClose}){
   },[series,ind.macd,ind.rsi,ind.stoch,ind.roc]);
 
   const chartW=740,chartH=220,pad=36;
-  const subH=100;
+  const subH=110;
   const toggle=k=>setInd(x=>({...x,[k]:!x[k]}));
   const tbtn=(k,l)=>e("button",{key:k,className:"btn btn-xs"+(ind[k]?" btn-p":""),onClick:()=>toggle(k),style:{fontSize:9}},l);
   const onHandleDown=ev=>{
@@ -878,7 +919,10 @@ function TickerChart({ticker,name,onClose}){
     const last=series[series.length-1];
     const first=series[0];
     const color=last>=first?"#1D9E75":"#ef4444";
+    const yTicks=niceTicks(yMin,yMax,5);
+    const xIdx=xTickIndices(series.length,6);
     chart=e("svg",{width:"100%",viewBox:"0 0 "+chartW+" "+chartH,style:{display:"block"}},
+      yTicks.map(y=>e("line",{key:"gy"+y,x1:pad,y1:cy(y),x2:chartW-pad,y2:cy(y),stroke:"#1a2540",strokeWidth:".5",strokeDasharray:"2,3",opacity:.4})),
       overlays.bb&&e("polyline",{points:polylinePoints(overlays.bb.upper,cx,cy),fill:"none",stroke:"#a78bfa",strokeWidth:"1",strokeDasharray:"4,2",opacity:.7}),
       overlays.bb&&e("polyline",{points:polylinePoints(overlays.bb.lower,cx,cy),fill:"none",stroke:"#a78bfa",strokeWidth:"1",strokeDasharray:"4,2",opacity:.7}),
       overlays.bb&&e("polyline",{points:polylinePoints(overlays.bb.middle,cx,cy),fill:"none",stroke:"#a78bfa",strokeWidth:"1",opacity:.9}),
@@ -890,8 +934,14 @@ function TickerChart({ticker,name,onClose}){
       overlays.vwap&&e("polyline",{points:polylinePoints(overlays.vwap,cx,cy),fill:"none",stroke:"#10b981",strokeWidth:"1",strokeDasharray:"5,3"}),
       e("polyline",{points:series.map((v,i)=>cx(i)+","+cy(v)).join(" "),fill:"none",stroke:color,strokeWidth:"1.5"}),
       e("text",{x:chartW-pad,y:16,textAnchor:"end",fontSize:13,fill:color,fontWeight:"bold"},"$"+last.toFixed(2)),
-      e("text",{x:pad,y:chartH-10,fontSize:9,fill:"#475569"},data.start_date),
-      e("text",{x:chartW-pad,y:chartH-10,textAnchor:"end",fontSize:9,fill:"#475569"},data.end_date)
+      yTicks.map(y=>e("g",{key:"yt"+y},
+        e("line",{x1:pad-4,y1:cy(y),x2:pad,y2:cy(y),stroke:"#475569",strokeWidth:".5"}),
+        e("text",{x:pad-6,y:cy(y)+3,textAnchor:"end",fontSize:9,fill:"#475569"},fmtPrice(y))
+      )),
+      xIdx.map(i=>e("g",{key:"xt"+i},
+        e("line",{x1:cx(i),y1:chartH-pad,x2:cx(i),y2:chartH-pad+4,stroke:"#475569",strokeWidth:".5"}),
+        e("text",{x:cx(i),y:chartH-pad+15,textAnchor:"middle",fontSize:9,fill:"#475569"},formatDateTick(data.dates[i],range))
+      ))
     );
   }
 
@@ -908,11 +958,16 @@ function TickerChart({ticker,name,onClose}){
     if(!content||!series||series.length<2)return null;
     const cx=i=>pad+i/(series.length-1)*(chartW-pad*2);
     const cy=v=>subH-pad/2-(v-yMin)/(yMax-yMin||1)*(subH-pad);
+    const xIdx=xTickIndices(series.length,6);
     return e("div",{style:{marginTop:6}},
       e("div",{style:{fontSize:9,color:"#64748b",marginBottom:2}},label),
       e("svg",{width:"100%",viewBox:"0 0 "+chartW+" "+subH,style:{display:"block",background:"#06090f",borderRadius:4}},
         refs&&refs.map((r,i)=>e("line",{key:i,x1:pad,y1:cy(r.v),x2:chartW-pad,y2:cy(r.v),stroke:r.c||"#1a2540",strokeWidth:".5",strokeDasharray:"3,3"})),
-        content(cx,cy)
+        content(cx,cy),
+        xIdx.map(i=>e("g",{key:"xt"+i},
+          e("line",{x1:cx(i),y1:subH-pad/2,x2:cx(i),y2:subH-pad/2+3,stroke:"#475569",strokeWidth:".5"}),
+          e("text",{x:cx(i),y:subH-pad/2+12,textAnchor:"middle",fontSize:9,fill:"#475569"},formatDateTick(data.dates[i],range))
+        ))
       )
     );
   };
