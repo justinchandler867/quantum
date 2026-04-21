@@ -644,7 +644,7 @@ function Discovery({profile,ports,onAdd}){
     // Apply custom factor weights if available
     if(a.zMom!==undefined){
       const customScore=factorW.momentum*(a.zMom||0)+factorW.quality*(a.zQual||0)+factorW.value*(a.zVal||0)+factorW.low_vol*(a.zVol||0)+factorW.yield*(a.zYield||0);
-      fit=Math.max(0,Math.min(100,Math.round((customScore+2)*10+40)));
+      fit=Math.max(0,Math.min(100,Math.round(customScore*20+60)));
     }
     return{...a,fit};
   }).filter(a=>(tf==="All"||a.t===tf||a.sec===tf)&&(!search||a.id.toLowerCase().includes(search.toLowerCase())||a.n.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>sd*(b[sk]||0)-sd*(a[sk]||0));
