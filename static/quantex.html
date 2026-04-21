@@ -855,16 +855,17 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
               const a=ASSETS.find(u=>u.id===k)||{};
               if(!a.goals)console.warn("Quantex: orphan ticker in portfolio:",k);
               const fit=fitScore(a,profile);
+              const orphan=!a.goals;
               return e("tr",{key:k,style:{borderBottom:"1px solid #06090f"}},
                 e("td",{style:{padding:"4px 5px",color:COLORS[i%COLORS.length],fontWeight:"bold"}},k),
                 e("td",{style:{padding:"4px 5px",color:"#64748b",maxWidth:110,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},a.n),
                 e("td",{style:{padding:"4px 5px"}},e("span",{className:"type-badge",style:{background:(TC[a.t]||"#818cf8")+"22",color:TC[a.t]||"#818cf8"}},a.t)),
                 e("td",{style:{padding:"4px 5px",fontWeight:"bold"}},weights[k]+"%"),
-                e("td",{style:{padding:"4px 5px"},className:a.ret>=0?"up":"dn"},(a.ret>0?"+":"")+a.ret+"%"),
-                e("td",{style:{padding:"4px 5px"}},a.vol+"%"),
-                e("td",{style:{padding:"4px 5px"}},a.beta),
-                e("td",{style:{padding:"4px 5px",color:a.sh>=1?"#1D9E75":a.sh>=.5?"#f59e0b":"#ef4444"}},a.sh),
-                e("td",{style:{padding:"4px 5px"}},a.yld+"%"),
+                e("td",{style:{padding:"4px 5px"},className:orphan?"":(a.ret>=0?"up":"dn")},orphan?"—":(a.ret>0?"+":"")+a.ret+"%"),
+                e("td",{style:{padding:"4px 5px"}},orphan?"—":a.vol+"%"),
+                e("td",{style:{padding:"4px 5px"}},orphan?"—":a.beta),
+                e("td",{style:{padding:"4px 5px",color:orphan?"#475569":(a.sh>=1?"#1D9E75":a.sh>=.5?"#f59e0b":"#ef4444")}},orphan?"—":a.sh),
+                e("td",{style:{padding:"4px 5px"}},orphan?"—":a.yld+"%"),
                 e("td",{style:{padding:"4px 5px",fontWeight:"bold",color:fit>=70?"#1D9E75":fit>=45?"#f59e0b":"#ef4444"}},fit)
               );
             }))
