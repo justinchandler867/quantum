@@ -405,6 +405,7 @@ class StrategyRequest(BaseModel):
 class PricesRequest(BaseModel):
     tickers: list[str] = Field(..., min_length=1, max_length=50)
     range: str = Field("1Y", pattern="^(1W|1M|1Q|1Y|3Y|5Y|common)$")
+    include_volume: bool = False
 
 
 class PricesResponse(BaseModel):
@@ -413,3 +414,4 @@ class PricesResponse(BaseModel):
     start_date: str
     end_date: str
     skipped: list[str] = Field(default_factory=list, description="Requested tickers with no price data")
+    volume: dict[str, list[float]] | None = None

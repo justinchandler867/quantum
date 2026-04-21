@@ -79,6 +79,7 @@ logger = logging.getLogger(__name__)
 # In production, replace with a proper database-backed store.
 _store = {
     "prices": None,
+    "volumes": None,
     "returns": None,
     "normal_returns": None,
     "stress_returns": None,
@@ -130,7 +131,7 @@ def _ensure_data(tickers: list[str]) -> None:
     # Fetch everything
     logger.info(f"Loading price data for {len(all_needed)} tickers...")
     try:
-        prices = fetch_prices(list(all_needed), include_hedges=True)
+        prices, volumes = fetch_prices(list(all_needed), include_hedges=True, return_volumes=True)
     except Exception as exc:
         logger.error(f"Price fetch failed: {exc}")
         raise HTTPException(status_code=502, detail=f"Failed to fetch price data: {exc}")
@@ -140,6 +141,7 @@ def _ensure_data(tickers: list[str]) -> None:
     normal_returns, stress_returns = split_returns_by_regime(returns, stress_mask)
 
     _store["prices"] = prices
+    _store["volumes"] = volumes
     _store["returns"] = returns
     _store["normal_returns"] = normal_returns
     _store["stress_returns"] = stress_returns
@@ -375,6 +377,7 @@ async def get_diagnostics(req: DiagnosticsRequest):
 async def refresh_data():
     """Force a data reload. Used by the scheduler or admin."""
     _store["prices"] = None
+    _store["volumes"] = None
     _store["returns"] = None
     _store["normal_returns"] = None
     _store["stress_returns"] = None
@@ -396,13 +399,14 @@ async def get_prices(req: PricesRequest):
     shared dates. Wide format: one array per ticker, all indexed by `dates`.
     Tickers with no price data are reported in `skipped`, not erroring.
     """
-    ck = cache_key("prices", req.tickers, range=req.range)
+    ck = cache_key("prices", req.tickers, range=req.range, vol=int(req.include_volume))
     cached = cache_get(ck)
     if cached:
         return PricesResponse(**cached)
 
     _ensure_data(req.tickers)
     prices_df = _store["prices"]
+    volumes_df = _store["volumes"]
 
     available = [t for t in req.tickers if t in prices_df.columns]
     skipped = [t for t in req.tickers if t not in prices_df.columns]
@@ -428,12 +432,18 @@ async def get_prices(req: PricesRequest):
             detail="No overlapping price data for requested tickers in this range",
         )
 
+    volume_out = None
+    if req.include_volume and volumes_df is not None:
+        vol_sliced = volumes_df.reindex(index=sliced.index)[available]
+        volume_out = {t: vol_sliced[t].fillna(0).tolist() for t in available}
+
     response = PricesResponse(
         dates=[d.strftime("%Y-%m-%d") for d in sliced.index],
         prices={t: sliced[t].tolist() for t in available},
         start_date=sliced.index[0].strftime("%Y-%m-%d"),
         end_date=sliced.index[-1].strftime("%Y-%m-%d"),
         skipped=skipped,
+        volume=volume_out,
     )
 
     cache_set(ck, response.model_dump(), CACHE_TTL_DAILY)

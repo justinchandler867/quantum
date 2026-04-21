@@ -25,11 +25,14 @@ def fetch_prices(
     tickers: list[str],
     years: int = PRICE_HISTORY_YEARS,
     include_hedges: bool = True,
-) -> pd.DataFrame:
+    return_volumes: bool = False,
+):
     """
     Fetch adjusted close prices for a list of tickers.
     Returns a DataFrame with DatetimeIndex and one column per ticker.
     Missing tickers are dropped with a warning.
+    If return_volumes=True, returns (prices, volumes) — volumes DataFrame
+    is aligned to the prices index and columns.
     """
     all_tickers = list(set(tickers))
     if include_hedges:
@@ -42,12 +45,15 @@ def fetch_prices(
 
     # Use Ticker.history() per ticker (more reliable across yfinance versions)
     frames = {}
+    vframes = {}
     for ticker in all_tickers:
         try:
             t = yf.Ticker(ticker)
             hist = t.history(start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"))
             if hist is not None and not hist.empty and "Close" in hist.columns:
                 frames[ticker] = hist["Close"]
+                if "Volume" in hist.columns:
+                    vframes[ticker] = hist["Volume"]
         except Exception as ex:
             logger.debug(f"Skipping {ticker}: {ex}")
 
@@ -68,6 +74,11 @@ def fetch_prices(
     prices = prices.ffill(limit=5).dropna()
 
     logger.info(f"Price matrix: {prices.shape[0]} days × {prices.shape[1]} tickers")
+
+    if return_volumes:
+        volumes = pd.DataFrame({t: v for t, v in vframes.items() if t in prices.columns})
+        volumes = volumes.reindex(index=prices.index, columns=prices.columns).ffill(limit=5).fillna(0)
+        return prices, volumes
     return prices
 
 
