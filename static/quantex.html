@@ -528,9 +528,13 @@ async function optimizeBackend(tickers, goal, maxPos, riskScore, currentWeights)
 }
 
 // ── Onboard ──────────────────────────────────────────────────────────────────
-function Onboard({onDone}){
+function Onboard({onDone,current}){
+  const DEFAULTS={goal:"",age:"36-45",inc:"$100K-$250K",nw:"$100K-$500K",hor:"7-15 years",los:"Hold steady",exp:"Intermediate",liq:"Medium (3-5 yrs)",der:"None"};
   const[step,setStep]=useState(0);
-  const[a,setA]=useState({goal:"",age:"36-45",inc:"$100K-$250K",nw:"$100K-$500K",hor:"7-15 years",los:"Hold steady",exp:"Intermediate",liq:"Medium (3-5 yrs)",der:"None"});
+  const[a,setA]=useState(()=>{
+    if(!current)return DEFAULTS;
+    return {...DEFAULTS,...(current._raw||{}),goal:current.goal||DEFAULTS.goal,hor:current.hor||DEFAULTS.hor};
+  });
   const set=(k,v)=>setA(x=>({...x,[k]:v}));
   const rc=s=>s>=80?"#ef4444":s>=60?"#f59e0b":s>=40?"#818cf8":"#1D9E75";
 
@@ -631,7 +635,7 @@ function Onboard({onDone}){
       ),
       e("div",{className:"step-nav"},
         e("button",{className:"btn btn-g",onClick:()=>setStep(1)},"← Back"),
-        e("button",{className:"btn btn-p",onClick:()=>onDone(p)},"Start Discovering →")
+        e("button",{className:"btn btn-p",onClick:()=>onDone({...p,_raw:a})},"Start Discovering →")
       )
     )
   );
@@ -2827,7 +2831,7 @@ function CourseHub({profile,ports,activePort}){
 // ── Root App ──────────────────────────────────────────────────────────────────
 function App({user,logout}){
   const[profile,setProfile]=useState(()=>{try{const s=localStorage.getItem("qx_profile");return s?JSON.parse(s):null;}catch(e){return null;}});
-  const[tab,setTab]=useState(()=>{try{return localStorage.getItem("qx_profile")?"disco":"onboard";}catch(e){return "onboard";}});
+  const[tab,setTab]=useState("onboard");
   const[ports,setPorts]=useState(()=>{try{const s=localStorage.getItem("qx_ports");return s?JSON.parse(s):{A:{},B:{},C:{}};}catch(e){return{A:{},B:{},C:{}};}});
   const[ap,setAp]=useState("A");
   const[screening,setScreening]=useState(false);
@@ -2903,7 +2907,7 @@ function App({user,logout}){
   const as=Object.keys(aw).length>0?calcStats(aw):null;
 
   const TABS=[
-    {id:"onboard",l:"① PROFILE",lk:false,done:!!profile},
+    {id:"onboard",l:"① PROFILE"+(profile?" · Saved":""),lk:false,done:!!profile},
     {id:"disco",l:"② DISCOVERY",lk:locked},
     {id:"metrics",l:"METRICS",lk:locked},
     {id:"corr",l:"CORRELATIONS",lk:locked},
@@ -2935,7 +2939,7 @@ function App({user,logout}){
     e("div",{className:"body"},
       e("div",{className:"main"},
         screenError&&tab==="disco"&&e("div",{className:"warn-box",style:{margin:"0 0 10px"}},"⚠ Backend: "+screenError+" — showing sample data. Start the backend with: uvicorn app.main:app"),
-        tab==="onboard"&&e(Onboard,{onDone}),
+        tab==="onboard"&&e(Onboard,{onDone,current:profile}),
         tab==="disco"&&e(Discovery,{profile,ports,onAdd:togglePort}),
         tab==="metrics"&&e(Metrics,{weights:aw}),
         tab==="corr"&&e(Correlations,{weights:aw,profile,backendOk}),
