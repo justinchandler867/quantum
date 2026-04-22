@@ -438,6 +438,47 @@ class TickerAddRequest(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=10)
 
 
+class OrderSubmitRequest(BaseModel):
+    ticker: str = Field(..., min_length=1, max_length=10)
+    side: str = Field(..., pattern="^(buy|sell)$")
+    quantity: int = Field(..., ge=1)
+    order_type: str = Field("market", pattern="^(market|limit|stop|stop_limit)$")
+    tif: str = Field("day", pattern="^(day|gtc)$")
+    limit_price: float | None = Field(None, gt=0)
+    stop_price: float | None = Field(None, gt=0)
+
+
+class OrderResponse(BaseModel):
+    order_id: str
+    ticker: str
+    side: str
+    quantity: int
+    order_type: str
+    tif: str
+    status: str
+    limit_price: float | None = None
+    stop_price: float | None = None
+    triggered_at: str | None = None
+    submitted_at: str
+    filled_at: str | None = None
+    cancelled_at: str | None = None
+    expired_at: str | None = None
+    fill_price: float | None = None
+    reject_reason: str | None = None
+
+
+class OrderListResponse(BaseModel):
+    orders: list[OrderResponse] = Field(default_factory=list)
+
+
+class CancelOrderRequest(BaseModel):
+    order_id: str = Field(..., min_length=1)
+
+
+class CheckOrdersResponse(BaseModel):
+    changed: list[OrderResponse] = Field(default_factory=list)
+
+
 class NewsRequest(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=10)
 

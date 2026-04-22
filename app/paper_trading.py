@@ -19,6 +19,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import yfinance as yf
@@ -43,12 +44,21 @@ class OrderSide(str, Enum):
 class OrderType(str, Enum):
     MARKET = "market"
     LIMIT = "limit"
+    STOP = "stop"
+    STOP_LIMIT = "stop_limit"
+
+
+class TIF(str, Enum):
+    DAY = "day"
+    GTC = "gtc"
 
 
 class OrderStatus(str, Enum):
     FILLED = "filled"
     REJECTED = "rejected"
     PENDING = "pending"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
 
 
 @dataclass
@@ -68,6 +78,27 @@ class Transaction:
 
     # CFA curriculum tags
     cfa_concepts: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Order:
+    """A trading order (may be pending, filled, cancelled, or expired)."""
+    order_id: str
+    ticker: str
+    side: str                        # buy / sell
+    quantity: int
+    order_type: str                  # market / limit / stop / stop_limit
+    tif: str                         # day / gtc
+    status: str                      # pending / filled / cancelled / expired / rejected
+    limit_price: float | None = None # LIMIT + STOP_LIMIT
+    stop_price: float | None = None  # STOP + STOP_LIMIT
+    triggered_at: str | None = None  # STOP_LIMIT: set when stop fires
+    submitted_at: str = ""
+    filled_at: str | None = None
+    cancelled_at: str | None = None
+    expired_at: str | None = None
+    fill_price: float | None = None
+    reject_reason: str | None = None
 
 
 @dataclass
@@ -174,6 +205,24 @@ def get_batch_prices(tickers: list[str]) -> dict[str, float]:
     return prices
 
 
+_ET = ZoneInfo("America/New_York")
+
+
+def _is_day_expired(submitted_at_iso: str, now_utc: datetime) -> bool:
+    """True if a DAY order submitted at submitted_at_iso is past 4pm ET on
+    its submission day (i.e., the market close that follows submission)."""
+    try:
+        sub_dt = datetime.fromisoformat(submitted_at_iso)
+        if sub_dt.tzinfo is None:
+            sub_dt = sub_dt.replace(tzinfo=timezone.utc)
+        sub_et = sub_dt.astimezone(_ET)
+        now_et = now_utc.astimezone(_ET)
+        close = sub_et.replace(hour=16, minute=0, second=0, microsecond=0)
+        return now_et > close
+    except (ValueError, TypeError):
+        return False
+
+
 # ── Paper Trading Account ────────────────────────────────────────────────────
 
 class PaperAccount:
@@ -194,6 +243,9 @@ class PaperAccount:
 
         # Transaction log
         self._transactions: list[dict] = []
+
+        # Orders (pending + filled + cancelled + expired, as dicts)
+        self._orders: list[dict] = []
 
         # NAV history for performance computation
         self._nav_history: list[dict] = []
@@ -334,6 +386,182 @@ class PaperAccount:
         self._transactions.append(asdict(tx))
         logger.warning(f"REJECTED: {side} {quantity} {ticker} — {reason}")
         return tx
+
+    # ── Order Submission / Cancellation / Monitoring ─────────────────────────
+
+    def submit_order(
+        self,
+        ticker: str,
+        side: OrderSide,
+        quantity: int,
+        order_type: OrderType = OrderType.MARKET,
+        tif: TIF = TIF.DAY,
+        limit_price: float | None = None,
+        stop_price: float | None = None,
+    ) -> Order:
+        """
+        Submit a new order. MARKET orders fill immediately; others wait
+        in the pending queue until their conditions are met.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        order_id = str(uuid.uuid4())[:12]
+
+        # Validation
+        if quantity < 1:
+            return self._order_reject(order_id, now, ticker, side.value, quantity,
+                                      order_type.value, tif.value, limit_price,
+                                      stop_price, "Quantity must be at least 1")
+        if order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT) and (limit_price is None or limit_price <= 0):
+            return self._order_reject(order_id, now, ticker, side.value, quantity,
+                                      order_type.value, tif.value, limit_price,
+                                      stop_price, f"{order_type.value} order requires limit_price")
+        if order_type in (OrderType.STOP, OrderType.STOP_LIMIT) and (stop_price is None or stop_price <= 0):
+            return self._order_reject(order_id, now, ticker, side.value, quantity,
+                                      order_type.value, tif.value, limit_price,
+                                      stop_price, f"{order_type.value} order requires stop_price")
+
+        if order_type == OrderType.MARKET:
+            # Route through existing execute_trade at current market price
+            tx = self.execute_trade(ticker, side, quantity)
+            if tx.status == "filled":
+                order = Order(
+                    order_id=order_id, ticker=ticker, side=side.value, quantity=quantity,
+                    order_type=order_type.value, tif=tif.value,
+                    status=OrderStatus.FILLED.value,
+                    submitted_at=now, filled_at=tx.timestamp, fill_price=tx.price,
+                )
+            else:
+                order = Order(
+                    order_id=order_id, ticker=ticker, side=side.value, quantity=quantity,
+                    order_type=order_type.value, tif=tif.value,
+                    status=OrderStatus.REJECTED.value,
+                    submitted_at=now, reject_reason=tx.reason,
+                )
+            self._orders.append(asdict(order))
+            return order
+
+        # Non-market: create pending order
+        order = Order(
+            order_id=order_id, ticker=ticker, side=side.value, quantity=quantity,
+            order_type=order_type.value, tif=tif.value,
+            status=OrderStatus.PENDING.value,
+            limit_price=round(limit_price, 2) if limit_price else None,
+            stop_price=round(stop_price, 2) if stop_price else None,
+            submitted_at=now,
+        )
+        self._orders.append(asdict(order))
+        logger.info(f"SUBMIT {order_type.value} {side.value} {quantity} {ticker} "
+                    f"limit={limit_price} stop={stop_price} tif={tif.value}")
+        return order
+
+    def cancel_order(self, order_id: str) -> Order | None:
+        """Cancel a pending order. Returns the updated order, or None if not found."""
+        for o in self._orders:
+            if o["order_id"] == order_id:
+                if o["status"] != OrderStatus.PENDING.value:
+                    logger.warning(f"Cannot cancel order {order_id}: status is {o['status']}")
+                    return Order(**o)
+                o["status"] = OrderStatus.CANCELLED.value
+                o["cancelled_at"] = datetime.now(timezone.utc).isoformat()
+                logger.info(f"CANCEL order {order_id}")
+                return Order(**o)
+        return None
+
+    def get_orders(self) -> list[dict]:
+        """Return all orders, newest first."""
+        return list(reversed(self._orders))
+
+    def get_pending_orders(self) -> list[dict]:
+        return [o for o in self._orders if o["status"] == OrderStatus.PENDING.value]
+
+    def check_pending_orders(self, current_prices: dict[str, float]) -> list[Order]:
+        """
+        Evaluate every pending order against current prices. Fills orders whose
+        conditions are met; expires DAY orders past market close (4pm ET on their
+        submission day). Returns a list of orders whose state changed.
+        """
+        changed: list[Order] = []
+        now_utc = datetime.now(timezone.utc)
+
+        for o in self._orders:
+            if o["status"] != OrderStatus.PENDING.value:
+                continue
+
+            # Check DAY expiry first (doesn't require price)
+            if o["tif"] == TIF.DAY.value and _is_day_expired(o["submitted_at"], now_utc):
+                o["status"] = OrderStatus.EXPIRED.value
+                o["expired_at"] = now_utc.isoformat()
+                logger.info(f"EXPIRE DAY order {o['order_id']}")
+                changed.append(Order(**o))
+                continue
+
+            price = current_prices.get(o["ticker"])
+            if price is None:
+                continue
+
+            ot = o["order_type"]
+            side = o["side"]
+            fill_price: float | None = None
+
+            if ot == OrderType.LIMIT.value:
+                lim = o["limit_price"]
+                if side == "buy" and price <= lim:
+                    fill_price = lim
+                elif side == "sell" and price >= lim:
+                    fill_price = lim
+
+            elif ot == OrderType.STOP.value:
+                sp = o["stop_price"]
+                if side == "buy" and price >= sp:
+                    fill_price = price
+                elif side == "sell" and price <= sp:
+                    fill_price = price
+
+            elif ot == OrderType.STOP_LIMIT.value:
+                if not o.get("triggered_at"):
+                    # Not yet triggered: check stop
+                    sp = o["stop_price"]
+                    triggered = (side == "buy" and price >= sp) or (side == "sell" and price <= sp)
+                    if triggered:
+                        o["triggered_at"] = now_utc.isoformat()
+                        logger.info(f"TRIGGER stop on order {o['order_id']} at {price}")
+                        changed.append(Order(**o))
+                        # Fall through: may also fill this tick if limit already satisfied
+                if o.get("triggered_at"):
+                    lim = o["limit_price"]
+                    if side == "buy" and price <= lim:
+                        fill_price = lim
+                    elif side == "sell" and price >= lim:
+                        fill_price = lim
+
+            if fill_price is not None:
+                # Execute at determined fill price
+                tx = self.execute_trade(o["ticker"], OrderSide(side), o["quantity"], price=fill_price)
+                if tx.status == "filled":
+                    o["status"] = OrderStatus.FILLED.value
+                    o["filled_at"] = tx.timestamp
+                    o["fill_price"] = tx.price
+                    logger.info(f"FILL order {o['order_id']} at {tx.price}")
+                else:
+                    o["status"] = OrderStatus.REJECTED.value
+                    o["reject_reason"] = tx.reason
+                    logger.warning(f"REJECT on fill attempt order {o['order_id']}: {tx.reason}")
+                changed.append(Order(**o))
+
+        return changed
+
+    def _order_reject(self, order_id, now, ticker, side, quantity, order_type,
+                      tif, limit_price, stop_price, reason) -> Order:
+        order = Order(
+            order_id=order_id, ticker=ticker, side=side, quantity=quantity,
+            order_type=order_type, tif=tif,
+            status=OrderStatus.REJECTED.value,
+            limit_price=limit_price, stop_price=stop_price,
+            submitted_at=now, reject_reason=reason,
+        )
+        self._orders.append(asdict(order))
+        logger.warning(f"ORDER REJECT: {order_type} {side} {quantity} {ticker} — {reason}")
+        return order
 
     # ── Portfolio Valuation ──────────────────────────────────────────────────
 
@@ -563,6 +791,7 @@ class PaperAccount:
             "positions": self._positions,
             "transactions": self._transactions,
             "nav_history": self._nav_history,
+            "orders": self._orders,
         }
 
     @classmethod
@@ -576,6 +805,7 @@ class PaperAccount:
         acct._positions = data["positions"]
         acct._transactions = data["transactions"]
         acct._nav_history = data["nav_history"]
+        acct._orders = data.get("orders", [])
         return acct
 
     # ── Account Summary ──────────────────────────────────────────────────────

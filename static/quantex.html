@@ -2121,12 +2121,71 @@ function PaperTrading({backendOk}){
   const[loading,setLoading]=useState(false);
   const[lastMsg,setLastMsg]=useState("");
   const[tab,setPTab]=useState("positions"); // positions, performance, history
+  const[orderType,setOrderType]=useState("market");
+  const[tif,setTif]=useState("day");
+  const[limitPrice,setLimitPrice]=useState("");
+  const[stopPrice,setStopPrice]=useState("");
+  const[explainer,setExplainer]=useState(null);
+  const[orders,setOrders]=useState([]);
+  const[showOrderHistory,setShowOrderHistory]=useState(false);
+  const[checking,setChecking]=useState(false);
 
   // Persist to localStorage
   useEffect(()=>{try{const s=localStorage.getItem("qx_paper");if(s){const d=JSON.parse(s);setCash(d.cash||100000);setPositions(d.positions||{});setTxLog(d.txLog||[]);setNavHistory(d.navHistory||[{t:Date.now(),nav:100000}]);}}catch(e){}},[]);
   useEffect(()=>{try{localStorage.setItem("qx_paper",JSON.stringify({cash,positions,txLog,navHistory}));}catch(e){}},[cash,positions,txLog,navHistory]);
 
   const getPrice=(tk)=>{const a=ASSETS.find(x=>x.id===tk);return a?a.ret>0?Math.round(100+a.ret*2):Math.round(80+Math.random()*40):null;};
+
+  const refreshOrders=async()=>{
+    if(!backendOk)return;
+    try{const resp=await fetch(BACKEND_URL+"/api/paper/orders");const r=await resp.json();setOrders(r.orders||[]);}catch(e){}
+  };
+  useEffect(()=>{if(backendOk)refreshOrders();},[backendOk]);
+
+  const refreshAccount=async()=>{
+    try{const sum=await fetch(BACKEND_URL+"/api/paper/summary").then(r=>r.json());setCash(sum.cash);}catch(e){}
+    try{const pos=await fetch(BACKEND_URL+"/api/paper/positions").then(r=>r.json());const p={};pos.forEach(x=>{p[x.ticker]={shares:x.shares,avgCost:x.avg_cost,price:x.current_price,pnl:x.unrealized_pnl,pnlPct:x.unrealized_pnl_pct,weight:x.weight};});setPositions(p);}catch(e){}
+  };
+
+  const submitOrder=async(side)=>{
+    const tk=ticker.toUpperCase().trim();
+    if(!tk||qty<1)return;
+    if((orderType==="limit"||orderType==="stop_limit")&&!limitPrice){setLastMsg("Limit price required");return;}
+    if((orderType==="stop"||orderType==="stop_limit")&&!stopPrice){setLastMsg("Stop price required");return;}
+    setLoading(true);setLastMsg("");
+    try{
+      const body={ticker:tk,side,quantity:qty,order_type:orderType,tif};
+      if(limitPrice)body.limit_price=+limitPrice;
+      if(stopPrice)body.stop_price=+stopPrice;
+      const r=await apiFetch("/api/paper/order",body);
+      if(r.status==="filled")setLastMsg((side==="buy"?"Bought ":"Sold ")+r.quantity+" "+r.ticker+" @ $"+(r.fill_price||0).toFixed(2));
+      else if(r.status==="pending")setLastMsg("Order queued: "+orderType.toUpperCase().replace("_","-")+" "+side.toUpperCase()+" "+qty+" "+tk);
+      else if(r.status==="rejected")setLastMsg("Rejected: "+(r.reject_reason||"unknown"));
+      await refreshOrders();
+      if(r.status==="filled")await refreshAccount();
+    }catch(e){setLastMsg("Error: "+e.message);}
+    finally{setLoading(false);}
+  };
+
+  const cancelOrder=async(orderId)=>{
+    try{await apiFetch("/api/paper/order/cancel",{order_id:orderId});await refreshOrders();}
+    catch(e){setLastMsg("Cancel failed: "+e.message);}
+  };
+
+  const checkNow=async()=>{
+    setChecking(true);
+    try{
+      const r=await apiFetch("/api/paper/check-orders",{});
+      const n=(r.changed||[]).length;
+      setLastMsg(n>0?n+" order"+(n===1?"":"s")+" updated":"No order updates");
+      await refreshOrders();
+      if(n>0)await refreshAccount();
+    }catch(e){setLastMsg("Check failed: "+e.message);}
+    finally{setChecking(false);}
+  };
+
+  const pendingOrders=orders.filter(o=>o.status==="pending");
+  const finishedOrders=orders.filter(o=>o.status!=="pending").slice(0,50);
 
   const executeTrade=async(side)=>{
     const tk=ticker.toUpperCase().trim();if(!tk||qty<1)return;
@@ -2229,19 +2288,68 @@ function PaperTrading({backendOk}){
   const cx=i=>pad+i/(navPts.length-1||1)*(chartW-pad*2);
   const cy=v=>chartH-pad-(v-navMin)/(navMax-navMin||1)*(chartH-pad*2);
 
-  return e("div",{className:"pt-layout"},
+  const infoIcon=(key)=>e("button",{onClick:ev=>{ev.stopPropagation();setExplainer(key);},title:"What is this?",style:{background:"none",border:"none",color:"#6366f1",fontSize:11,cursor:"pointer",padding:"0 4px",marginLeft:4,lineHeight:1}},"ⓘ");
+
+  const EXPLAINERS={
+    market:{title:"MARKET ORDER",body:"Executes immediately at the current market price. Fastest fill but you don't control the price — during volatile moves, actual fill may differ from quoted price.",best:"Best for: liquid stocks when you want immediate execution."},
+    limit:{title:"LIMIT ORDER",body:"Executes only at your specified price or better. For a buy, the order fills only if price drops to or below your limit. For a sell, only if price rises to or above your limit.",best:"Best for: getting a specific price; risk is the order may never fill if the market doesn't reach your price."},
+    stop:{title:"STOP ORDER (STOP-LOSS)",body:"Triggers when price reaches your stop level. For a sell, used to limit losses — if price falls to your stop, a market order is submitted automatically. For a buy, used for breakouts — if price rises to your stop, you buy.",best:"Best for: automating exits or entries at key levels. Risk: in fast-moving markets, fill price may be worse than stop price."},
+    stop_limit:{title:"STOP-LIMIT ORDER",body:"Combines Stop and Limit. When price reaches your stop, a limit order is submitted (not a market order). This protects against bad fills in fast markets, but the limit order may not fill at all if price moves past your limit immediately.",best:"Best for: when you want stop-order triggering with price-protection of a limit order."},
+    day:{title:"DAY (TIME IN FORCE)",body:"Order expires at market close (4pm ET) if not filled. Standard for active trading — you don't want yesterday's orders hanging around.",best:""},
+    gtc:{title:"GTC — GOOD TILL CANCELLED",body:"Order stays active indefinitely until filled or manually cancelled. Useful for limit orders at levels you'd wait days or weeks for.",best:""},
+  };
+
+  return e(React.Fragment,null,
+  e("div",{className:"pt-layout"},
     // Left: Trade Ticket + Account
     e("div",null,
+      e("div",{style:{fontSize:10,color:"#fbbf24",background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)",borderRadius:6,padding:"6px 10px",marginBottom:8,lineHeight:1.5}},"Paper trading — orders do not execute in real markets. Price checks run when you interact with the app; DAY orders may not expire precisely at 4pm ET if you're idle."),
       e("div",{className:"card"},
         e("div",{className:"card-title"},"TRADE TICKET"),
         e("div",{className:"deriv-input"},e("div",{className:"deriv-lbl"},"TICKER"),e("input",{className:"pt-ticker",value:ticker,onChange:ev=>setTicker(ev.target.value),placeholder:"AAPL",maxLength:6})),
         e("div",{className:"deriv-input"},e("div",{className:"deriv-lbl"},"QUANTITY"),e("input",{className:"pt-qty",type:"number",value:qty,onChange:ev=>setQty(Math.max(1,+ev.target.value)),min:1})),
-        e("div",{style:{display:"flex",gap:6,marginTop:8}},
-          e("button",{className:"pt-buy",onClick:()=>executeTrade("buy"),disabled:loading||!ticker.trim()},"BUY"),
-          e("button",{className:"pt-sell",onClick:()=>executeTrade("sell"),disabled:loading||!ticker.trim()},"SELL")
+        e("div",{className:"deriv-input"},
+          e("div",{className:"deriv-lbl"},"ORDER TYPE",infoIcon(orderType)),
+          e("select",{className:"q-sel",value:orderType,onChange:ev=>setOrderType(ev.target.value),style:{width:"100%"}},
+            e("option",{value:"market"},"Market"),
+            e("option",{value:"limit"},"Limit"),
+            e("option",{value:"stop"},"Stop"),
+            e("option",{value:"stop_limit"},"Stop-Limit")
+          )
         ),
-        lastMsg&&e("div",{style:{marginTop:8,fontSize:10,padding:"6px 8px",background:lastMsg.includes("Bought")||lastMsg.includes("Sold")&&!lastMsg.includes("Insufficient")?"#0d2818":"#1c0a00",borderRadius:5,color:lastMsg.includes("Insufficient")||lastMsg.includes("Rejected")?"#fcd34d":"#6ee7b7"}},lastMsg),
-        loading&&e("div",{style:{marginTop:6,fontSize:10,color:"#818cf8"}},e("span",{className:"spin"},"◌")," Executing...")
+        (orderType==="limit"||orderType==="stop_limit")&&e("div",{className:"deriv-input"},e("div",{className:"deriv-lbl"},"LIMIT PRICE"),e("input",{className:"pt-qty",type:"number",value:limitPrice,onChange:ev=>setLimitPrice(ev.target.value),step:"0.01",min:"0",placeholder:"e.g. 182.50"})),
+        (orderType==="stop"||orderType==="stop_limit")&&e("div",{className:"deriv-input"},e("div",{className:"deriv-lbl"},"STOP PRICE"),e("input",{className:"pt-qty",type:"number",value:stopPrice,onChange:ev=>setStopPrice(ev.target.value),step:"0.01",min:"0",placeholder:"e.g. 175.00"})),
+        e("div",{className:"deriv-input"},
+          e("div",{className:"deriv-lbl"},"TIME IN FORCE"),
+          e("div",{style:{display:"flex",gap:10,fontSize:11}},
+            e("label",{style:{display:"flex",alignItems:"center",gap:4,cursor:"pointer"}},e("input",{type:"radio",name:"tif",value:"day",checked:tif==="day",onChange:()=>setTif("day"),style:{accentColor:"#6366f1"}}),"DAY",infoIcon("day")),
+            e("label",{style:{display:"flex",alignItems:"center",gap:4,cursor:"pointer"}},e("input",{type:"radio",name:"tif",value:"gtc",checked:tif==="gtc",onChange:()=>setTif("gtc"),style:{accentColor:"#6366f1"}}),"GTC",infoIcon("gtc"))
+          )
+        ),
+        e("div",{style:{display:"flex",gap:6,marginTop:8}},
+          e("button",{className:"pt-buy",onClick:()=>submitOrder("buy"),disabled:loading||!ticker.trim()},"BUY"),
+          e("button",{className:"pt-sell",onClick:()=>submitOrder("sell"),disabled:loading||!ticker.trim()},"SELL")
+        ),
+        lastMsg&&e("div",{style:{marginTop:8,fontSize:10,padding:"6px 8px",background:lastMsg.includes("Bought")||lastMsg.includes("Sold")||lastMsg.includes("queued")||lastMsg.includes("updated")?"#0d2818":"#1c0a00",borderRadius:5,color:lastMsg.includes("Rejected")||lastMsg.includes("failed")?"#fcd34d":"#6ee7b7"}},lastMsg),
+        loading&&e("div",{style:{marginTop:6,fontSize:10,color:"#818cf8"}},e("span",{className:"spin"},"◌")," Submitting...")
+      ),
+      pendingOrders.length>0&&e("div",{className:"card"},
+        e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}},
+          e("div",{className:"card-title",style:{marginBottom:0}},"PENDING ORDERS ("+pendingOrders.length+")"),
+          e("button",{className:"btn btn-xs",onClick:checkNow,disabled:checking,style:{fontSize:9}},checking?"Checking…":"Check now")
+        ),
+        pendingOrders.map(o=>e("div",{key:o.order_id,style:{fontSize:10,padding:"6px 4px",borderBottom:"1px solid #0a0f1c",display:"flex",justifyContent:"space-between",alignItems:"center",gap:6}},
+          e("div",{style:{flex:1,minWidth:0}},
+            e("div",{style:{fontWeight:"bold",color:o.side==="buy"?"#34d399":"#f87171"}},o.side.toUpperCase()+" "+o.quantity+" "+o.ticker," · ",o.order_type.toUpperCase().replace("_","-")),
+            e("div",{style:{color:"#64748b",marginTop:2}},
+              o.limit_price?"lim $"+o.limit_price.toFixed(2)+" ":"",
+              o.stop_price?"stop $"+o.stop_price.toFixed(2)+" ":"",
+              "· "+o.tif.toUpperCase()+" · "+relTime(o.submitted_at),
+              o.triggered_at?" · triggered":""
+            )
+          ),
+          e("button",{className:"btn btn-d btn-xs",onClick:()=>cancelOrder(o.order_id),style:{fontSize:9}},"Cancel")
+        ))
       ),
       e("div",{className:"card"},
         e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
@@ -2269,6 +2377,25 @@ function PaperTrading({backendOk}){
          ["Win Rate",totalTrades>0?(winTrades/totalTrades*100).toFixed(0)+"%":"—",""],
          ["Total Trades",totalTrades,""],
         ].map(([l,v,cls])=>e("div",{key:l,style:{display:"flex",justifyContent:"space-between",fontSize:10,padding:"3px 0",borderBottom:"1px solid #0a0f1c"}},e("span",{style:{color:"#475569"}},l),e("span",{className:cls,style:{fontWeight:"bold"}},v)))
+      ),
+      finishedOrders.length>0&&e("div",{className:"card"},
+        e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"},onClick:()=>setShowOrderHistory(!showOrderHistory)},
+          e("div",{className:"card-title",style:{marginBottom:0}},"ORDER HISTORY ("+finishedOrders.length+")"),
+          e("span",{style:{fontSize:11,color:"#64748b"}},showOrderHistory?"▲":"▼")
+        ),
+        showOrderHistory&&e("div",{style:{marginTop:8,maxHeight:260,overflowY:"auto"}},
+          finishedOrders.map(o=>e("div",{key:o.order_id,style:{fontSize:10,padding:"5px 2px",borderBottom:"1px solid #0a0f1c"}},
+            e("div",{style:{display:"flex",justifyContent:"space-between"}},
+              e("span",{style:{fontWeight:"bold",color:o.side==="buy"?"#34d399":"#f87171"}},o.side.toUpperCase()+" "+o.quantity+" "+o.ticker),
+              e("span",{style:{color:o.status==="filled"?"#34d399":o.status==="cancelled"?"#94a3b8":o.status==="expired"?"#64748b":"#f87171"}},o.status.toUpperCase())
+            ),
+            e("div",{style:{color:"#64748b",marginTop:2}},
+              o.order_type.toUpperCase().replace("_","-"),
+              o.fill_price?" · fill $"+o.fill_price.toFixed(2):"",
+              " · "+relTime(o.filled_at||o.cancelled_at||o.expired_at||o.submitted_at)
+            )
+          ))
+        )
       )
     ),
 
@@ -2345,6 +2472,15 @@ function PaperTrading({backendOk}){
         )
       )
     )
+  ),
+  explainer&&EXPLAINERS[explainer]&&e("div",{onClick:()=>setExplainer(null),style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:1200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+    e("div",{onClick:ev=>ev.stopPropagation(),style:{background:"#0b0f1e",border:"1px solid rgba(99,102,241,.2)",borderRadius:12,maxWidth:420,width:"100%",padding:18,position:"relative"}},
+      e("button",{onClick:()=>setExplainer(null),title:"Close (Esc)",style:{position:"absolute",top:8,right:10,background:"none",border:"none",color:"#94a3b8",fontSize:18,cursor:"pointer",padding:"2px 8px",lineHeight:1}},"✕"),
+      e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:10,letterSpacing:.5}},EXPLAINERS[explainer].title),
+      e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.6,marginBottom:EXPLAINERS[explainer].best?10:0}},EXPLAINERS[explainer].body),
+      EXPLAINERS[explainer].best&&e("div",{style:{fontSize:11,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},EXPLAINERS[explainer].best)
+    )
+  )
   );
 }
 

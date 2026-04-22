@@ -5,6 +5,7 @@ Correlation, covariance, and diagnostics API endpoints.
 import json
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -1181,7 +1182,14 @@ async def analyze_sector_endpoint(sector: str, api_key: str):
 
 # ── Paper Trading Endpoints ───────────────────────────────────────────────────
 
-from app.paper_trading import PaperAccount, OrderSide, get_cfa_tag, get_all_cfa_tags
+from app.paper_trading import (
+    PaperAccount, OrderSide, OrderType, TIF,
+    get_cfa_tag, get_all_cfa_tags, get_batch_prices,
+)
+from app.models import (
+    OrderSubmitRequest, OrderResponse, OrderListResponse,
+    CancelOrderRequest, CheckOrdersResponse,
+)
 
 # In-memory account store (keyed by account_id)
 # In production, persist to database
@@ -1195,13 +1203,26 @@ def _get_or_create_account(account_id: str = "default") -> PaperAccount:
     return _accounts[account_id]
 
 
+def _check_pending_against_live(acct: PaperAccount) -> None:
+    """Fetch current prices for any pending-order tickers and check fills.
+    Called as a side effect from price-fetching endpoints — no background task."""
+    pending = acct.get_pending_orders()
+    if not pending:
+        return
+    tickers = sorted({o["ticker"] for o in pending})
+    prices = get_batch_prices(tickers)
+    acct.check_pending_orders(prices)
+
+
 @app.post("/api/paper/trade", response_model=TradeResponse)
 async def paper_trade(req: TradeRequest, account_id: str = "default"):
     """
     Execute a paper trade at real market price.
     Buy or sell shares of any ticker. Price fetched from yfinance if not provided.
+    Also checks any pending limit/stop orders against current prices.
     """
     acct = _get_or_create_account(account_id)
+    _check_pending_against_live(acct)
     side = OrderSide.BUY if req.side == "buy" else OrderSide.SELL
     tx = acct.execute_trade(req.ticker.upper(), side, req.quantity, req.price)
 
@@ -1214,10 +1235,59 @@ async def paper_trade(req: TradeRequest, account_id: str = "default"):
     )
 
 
+@app.post("/api/paper/order", response_model=OrderResponse)
+async def paper_submit_order(req: OrderSubmitRequest, account_id: str = "default"):
+    """Submit a new order (market/limit/stop/stop-limit). Checks pending orders
+    against current prices first so newly ripe ones fill before the new submission."""
+    acct = _get_or_create_account(account_id)
+    _check_pending_against_live(acct)
+    order = acct.submit_order(
+        ticker=req.ticker.upper(),
+        side=OrderSide(req.side),
+        quantity=req.quantity,
+        order_type=OrderType(req.order_type),
+        tif=TIF(req.tif),
+        limit_price=req.limit_price,
+        stop_price=req.stop_price,
+    )
+    return OrderResponse(**asdict(order))
+
+
+@app.get("/api/paper/orders", response_model=OrderListResponse)
+async def paper_orders(account_id: str = "default"):
+    """Return all orders (all statuses), newest first."""
+    acct = _get_or_create_account(account_id)
+    _check_pending_against_live(acct)
+    return OrderListResponse(orders=[OrderResponse(**o) for o in acct.get_orders()])
+
+
+@app.post("/api/paper/order/cancel", response_model=OrderResponse)
+async def paper_cancel_order(req: CancelOrderRequest, account_id: str = "default"):
+    """Cancel a pending order by order_id."""
+    acct = _get_or_create_account(account_id)
+    order = acct.cancel_order(req.order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail=f"Order {req.order_id} not found")
+    return OrderResponse(**asdict(order))
+
+
+@app.post("/api/paper/check-orders", response_model=CheckOrdersResponse)
+async def paper_check_orders(account_id: str = "default"):
+    """Manually fetch current prices for all pending orders and check for fills.
+    Used by the 'Check now' button in the UI."""
+    acct = _get_or_create_account(account_id)
+    pending = acct.get_pending_orders()
+    tickers = sorted({o["ticker"] for o in pending}) if pending else []
+    prices = get_batch_prices(tickers) if tickers else {}
+    changed = acct.check_pending_orders(prices)
+    return CheckOrdersResponse(changed=[OrderResponse(**asdict(o)) for o in changed])
+
+
 @app.get("/api/paper/positions", response_model=list[PositionResponse])
 async def paper_positions(account_id: str = "default"):
     """Get all current positions with live prices and P&L."""
     acct = _get_or_create_account(account_id)
+    _check_pending_against_live(acct)
     positions = acct.get_positions()
     return [
         PositionResponse(
@@ -1248,6 +1318,7 @@ async def paper_performance(account_id: str = "default"):
 async def paper_summary(account_id: str = "default"):
     """Quick account overview: NAV, cash, positions, total return."""
     acct = _get_or_create_account(account_id)
+    _check_pending_against_live(acct)
     summary = acct.get_summary()
     return AccountSummaryResponse(**summary)
 
