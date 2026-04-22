@@ -944,6 +944,7 @@ function TickerChart({ticker,name,onClose}){
   const[data,setData]=useState(null);
   const[loading,setLoading]=useState(false);
   const[err,setErr]=useState(null);
+  const[showConsensus,setShowConsensus]=useState(false);
 
   const[size,setSize]=useState(()=>{
     try{
@@ -972,7 +973,12 @@ function TickerChart({ticker,name,onClose}){
   },[ticker,range,wantVolume]);
 
   useEffect(()=>{
-    const h=ev=>{if(ev.key==="Escape")onClose();};
+    const h=ev=>{
+      if(ev.key==="Escape"){
+        if(showConsensus){setShowConsensus(false);return;}
+        onClose();
+      }
+    };
     const prev=document.body.style.overflow;
     document.body.style.overflow="hidden";
     document.addEventListener("keydown",h);
@@ -980,7 +986,7 @@ function TickerChart({ticker,name,onClose}){
       document.body.style.overflow=prev;
       document.removeEventListener("keydown",h);
     };
-  },[onClose]);
+  },[onClose,showConsensus]);
 
   useEffect(()=>{
     if(!dragging)return;
@@ -1047,6 +1053,78 @@ function TickerChart({ticker,name,onClose}){
     };
   },[series,ind.macd,ind.rsi,ind.stoch,ind.roc]);
 
+  const votes=useMemo(()=>{
+    if(!series||series.length<1)return [];
+    const last=series[series.length-1];
+    const lastIdx=series.length-1;
+    const v=[];
+    const overlayVote=(key,label,arr)=>{
+      if(!arr)return;
+      const val=arr[lastIdx];
+      if(val===undefined)return;
+      const vote=last>val?"bullish":last<val?"bearish":"neutral";
+      const detail="price "+(last>val?"above":last<val?"below":"at")+" "+label;
+      v.push({key,label,vote,detail});
+    };
+    if(ind.sma20)overlayVote("sma20","SMA20",overlays.sma20);
+    if(ind.sma50)overlayVote("sma50","SMA50",overlays.sma50);
+    if(ind.sma200)overlayVote("sma200","SMA200",overlays.sma200);
+    if(ind.ema12)overlayVote("ema12","EMA12",overlays.ema12);
+    if(ind.ema26)overlayVote("ema26","EMA26",overlays.ema26);
+    if(ind.bb&&overlays.bb){
+      const up=overlays.bb.upper[lastIdx],lo=overlays.bb.lower[lastIdx];
+      if(up!==undefined&&lo!==undefined){
+        const bw=up-lo;
+        let vote="neutral",detail="within bands";
+        if(last<lo+bw*0.2){vote="bullish";detail="near lower band";}
+        else if(last>up-bw*0.2){vote="bearish";detail="near upper band";}
+        v.push({key:"bb",label:"Bollinger",vote,detail});
+      }
+    }
+    if(ind.vwap)overlayVote("vwap","VWAP",overlays.vwap);
+    if(ind.macd&&sub.macd){
+      const m=sub.macd.macd[lastIdx],s=sub.macd.signal[lastIdx];
+      if(m!==undefined&&s!==undefined){
+        const vote=m>s?"bullish":m<s?"bearish":"neutral";
+        v.push({key:"macd",label:"MACD",vote,detail:"MACD "+(m>s?"above":m<s?"below":"at")+" signal"});
+      }
+    }
+    if(ind.rsi&&sub.rsi){
+      const r=sub.rsi[lastIdx];
+      if(r!==undefined){
+        let vote="neutral",detail=r.toFixed(0);
+        if(r<30){vote="bullish";detail=r.toFixed(0)+" (oversold)";}
+        else if(r>70){vote="bearish";detail=r.toFixed(0)+" (overbought)";}
+        v.push({key:"rsi",label:"RSI",vote,detail});
+      }
+    }
+    if(ind.stoch&&sub.stoch){
+      const k=sub.stoch.k[lastIdx];
+      if(k!==undefined){
+        let vote="neutral",detail="%K "+k.toFixed(0);
+        if(k<20){vote="bullish";detail="%K "+k.toFixed(0)+" (oversold)";}
+        else if(k>80){vote="bearish";detail="%K "+k.toFixed(0)+" (overbought)";}
+        v.push({key:"stoch",label:"Stochastic",vote,detail});
+      }
+    }
+    if(ind.roc&&sub.roc){
+      const r=sub.roc[lastIdx];
+      if(r!==undefined){
+        const vote=r>0?"bullish":r<0?"bearish":"neutral";
+        v.push({key:"roc",label:"ROC",vote,detail:r.toFixed(1)+"%"});
+      }
+    }
+    return v;
+  },[series,overlays,sub,ind]);
+
+  const consensus=useMemo(()=>{
+    const bull=votes.filter(x=>x.vote==="bullish").length;
+    const bear=votes.filter(x=>x.vote==="bearish").length;
+    if(bull-bear>=2)return{label:"Buy",color:"#1D9E75"};
+    if(bear-bull>=2)return{label:"Sell",color:"#ef4444"};
+    return{label:"Hold",color:"#f59e0b"};
+  },[votes]);
+
   const chartW=740,chartH=220,pad=36;
   const subH=110;
   const toggle=k=>setInd(x=>({...x,[k]:!x[k]}));
@@ -1090,7 +1168,14 @@ function TickerChart({ticker,name,onClose}){
       xIdx.map(i=>e("g",{key:"xt"+i},
         e("line",{x1:cx(i),y1:chartH-pad,x2:cx(i),y2:chartH-pad+4,stroke:"#475569",strokeWidth:".5"}),
         e("text",{x:cx(i),y:chartH-pad+15,textAnchor:"middle",fontSize:9,fill:"#475569"},formatDateTick(data.dates[i],range))
-      ))
+      )),
+      e("g",{onClick:()=>setShowConsensus(true),style:{cursor:"pointer"}},
+        e("rect",{x:pad-4,y:8,width:votes.length>0?190:300,height:votes.length>0?64:26,fill:"rgba(11,15,30,.82)",rx:6,stroke:"rgba(99,102,241,.2)",strokeWidth:".5"}),
+        e("text",{x:pad+2,y:22,fontSize:9,fill:"#64748b"},votes.length>0?"INDICATOR CONSENSUS":"INDICATOR CONSENSUS · Turn on indicators"),
+        votes.length>0&&e("text",{x:pad+2,y:42,fontSize:18,fill:consensus.color,fontWeight:"bold"},consensus.label.toUpperCase()),
+        votes.length>0&&e("text",{x:pad+2,y:54,fontSize:9,fill:"#64748b"},"Based on "+votes.length+" active indicator"+(votes.length===1?"":"s")),
+        votes.length>0&&e("text",{x:pad+2,y:66,fontSize:8,fill:"#64748b",fontStyle:"italic"},"Not a trade recommendation")
+      )
     );
   }
 
@@ -1182,6 +1267,24 @@ function TickerChart({ticker,name,onClose}){
       loading&&e("div",{style:{color:"#475569",fontSize:11,padding:"20px 0",textAlign:"center"}},e("span",{className:"spin"},"◌")," Loading prices..."),
       err&&e("div",{className:"warn-box"},"⚠ "+err),
       chart,
+      showConsensus&&e("div",{onClick:()=>setShowConsensus(false),style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:1200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+        e("div",{onClick:ev=>ev.stopPropagation(),style:{background:"#0b0f1e",border:"1px solid rgba(99,102,241,.2)",borderRadius:12,maxWidth:440,width:"100%",padding:18,position:"relative"}},
+          e("button",{onClick:()=>setShowConsensus(false),title:"Close (Esc)",style:{position:"absolute",top:8,right:10,background:"none",border:"none",color:"#94a3b8",fontSize:18,cursor:"pointer",padding:"2px 8px",lineHeight:1}},"✕"),
+          e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:10,letterSpacing:.5}},"INDICATOR CONSENSUS BREAKDOWN"),
+          votes.length===0
+            ?e("div",{style:{color:"#64748b",fontSize:12,padding:"12px 4px",textAlign:"center"}},"No indicators active. Turn on indicators below the chart to see signal.")
+            :e("div",null,votes.map(v=>
+                e("div",{key:v.key,style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 4px",borderBottom:"1px solid rgba(99,102,241,.08)",fontSize:12}},
+                  e("span",{style:{color:"#94a3b8"}},
+                    v.label+": ",
+                    e("span",{style:{color:v.vote==="bullish"?"#1D9E75":v.vote==="bearish"?"#ef4444":"#f59e0b",fontWeight:"bold",textTransform:"capitalize"}},v.vote)
+                  ),
+                  e("span",{style:{color:"#64748b",fontSize:11}},v.detail)
+                )
+              )),
+          e("div",{style:{marginTop:14,padding:"10px 12px",background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)",borderRadius:8,fontSize:10,color:"#fbbf24",lineHeight:1.55,fontWeight:"bold"}},"This describes what the technical indicators are showing right now. It does not predict future prices or constitute investment advice. Always do your own research.")
+        )
+      ),
       macdPanel,rsiPanel,stochPanel,rocPanel
       ),
       e("div",{onMouseDown:onHandleDown,title:"Drag to resize",style:{position:"absolute",right:4,bottom:4,width:16,height:16,cursor:"nwse-resize",opacity:.6,zIndex:1}},
