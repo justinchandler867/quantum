@@ -132,6 +132,10 @@ body{font-family:'DM Sans',sans-serif;background:#0a0e1a;color:#c8d2e0;font-size
 .builder-layout{display:flex;gap:14px}
 .builder-left{width:260px;flex-shrink:0}
 .builder-right{flex:1;min-width:0}
+.opt-goal-card{background:rgba(99,102,241,.04);border:1px solid rgba(99,102,241,.15);border-radius:8px;padding:10px 12px;margin-bottom:6px;cursor:pointer;transition:all .15s}
+.opt-goal-card:hover{border-color:rgba(99,102,241,.3);background:rgba(99,102,241,.08)}
+.opt-goal-card.disabled{opacity:.5;cursor:not-allowed}
+.opt-goal-card.disabled:hover{border-color:rgba(99,102,241,.15);background:rgba(99,102,241,.04)}
 .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
 .stat-box{background:rgba(15,20,40,.5);border:1px solid rgba(99,102,241,.08);border-radius:10px;padding:10px 12px;transition:all .2s;position:relative}
 .stat-box:hover{border-color:rgba(99,102,241,.2);background:rgba(15,20,40,.7)}
@@ -1370,8 +1374,21 @@ function PortfolioChart({weights}){
 
 // ── Portfolio Builder ─────────────────────────────────────────────────────────
 function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
-  const[goal,setGoal]=useState("sharpe");
+  const[optView,setOptView]=useState("picker");
+  const[lastGoal,setLastGoal]=useState(null);
+  const OPT_GOALS=[
+    {id:"sharpe",title:"Best return per unit of risk",sub:"Finds the portfolio with the highest Sharpe ratio. Good if you want to maximize growth while controlling volatility.",result:"Found the weights that maximize (return − risk-free) ÷ volatility — the highest Sharpe ratio your constraints allow."},
+    {id:"minvol",title:"Lowest possible risk",sub:"Finds the portfolio with minimum volatility. Good if preserving capital matters more than growth.",result:"Minimized portfolio volatility — the most stable combination of your holdings."},
+    {id:"riskparity",title:"Spread risk evenly across holdings",sub:"Each position contributes equally to total portfolio risk. Good for diversification without concentrating bets.",result:"Equalized risk contributions across positions — no single position dominates."},
+  ];
   const tickers=Object.keys(weights);
+  const runOpt=async id=>{
+    if(tickers.length<2)return;
+    setLastGoal(id);
+    setOptView("running");
+    try{await onOpt(id,profile?.maxPos||30);}
+    finally{setOptView("results");}
+  };
   const stats=tickers.length>0?calcStats(weights):null;
   const total=Object.values(weights).reduce((a,b)=>a+b,0);
   if(!tickers.length)return e("div",{className:"card",style:{textAlign:"center",padding:36}},e("div",{style:{fontSize:22,marginBottom:9}},"📊"),e("div",{style:{color:"#475569"}},"No assets yet — go to Discovery and click + to add them here."));
@@ -1388,13 +1405,31 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
         e("div",{style:{fontSize:11,color:"#475569",marginTop:7,paddingTop:7,borderTop:"1px solid #1a2540"}},"Total: ",e("span",{style:{fontWeight:"bold",color:Math.abs(total-100)<2?"#1D9E75":"#ef4444"}},total+"%"))
       ),
       e("div",{className:"card"},
-        e("div",{className:"card-title"},"OPTIMIZE"),
-        [["sharpe","Maximize Sharpe"],["return","Maximize Return"],["minvol","Minimize Volatility"],["riskparity","Risk Parity"]].map(([v,l])=>
-          e("label",{key:v,style:{display:"flex",alignItems:"center",gap:5,fontSize:11,cursor:"pointer",marginBottom:6}},
-            e("input",{type:"radio",name:"og-"+name,value:v,checked:goal===v,onChange:()=>setGoal(v),style:{accentColor:"#6366f1"}}),l
-          )
+        e("div",{className:"card-title"},"OPTIMIZER"),
+        optView==="picker"&&e(React.Fragment,null,
+          e("div",{style:{fontSize:11,color:"#64748b",marginBottom:10,lineHeight:1.5}},"What do you want to optimize for?"),
+          OPT_GOALS.map(g=>e("div",{
+            key:g.id,
+            className:"opt-goal-card"+(tickers.length<2?" disabled":""),
+            onClick:()=>runOpt(g.id)
+          },
+            e("div",{style:{fontSize:13,fontWeight:"bold",color:"#e2e8f0",marginBottom:3}},g.title),
+            e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.5}},g.sub)
+          )),
+          tickers.length<2&&e("div",{style:{fontSize:10,color:"#475569",textAlign:"center",marginTop:6}},"Add at least 2 assets to optimize")
         ),
-        e("button",{className:"btn btn-p btn-full",style:{marginTop:8},onClick:()=>onOpt(goal,profile?.maxPos||30),disabled:tickers.length<2||optLoading},optLoading?e("span",null,e("span",{className:"spin"},"◌")," Optimizing…"):"▸ OPTIMIZE"),
+        optView==="running"&&e("div",{style:{textAlign:"center",padding:"20px 0"}},
+          e("div",{style:{fontSize:11,color:"#94a3b8",marginBottom:10}},"Optimizing for:"),
+          e("div",{style:{fontSize:13,color:"#a5b4fc",fontWeight:"bold",marginBottom:12}},(OPT_GOALS.find(g=>g.id===lastGoal)||{}).title),
+          e("div",{style:{fontSize:14,color:"#818cf8"}},e("span",{className:"spin"},"◌")," Working…")
+        ),
+        optView==="results"&&(()=>{const g=OPT_GOALS.find(x=>x.id===lastGoal)||{};return e(React.Fragment,null,
+          e("div",{style:{fontSize:10,color:"#64748b",marginBottom:3,letterSpacing:.3}},"OPTIMIZED FOR"),
+          e("div",{style:{fontSize:13,fontWeight:"bold",color:"#a5b4fc",marginBottom:8}},g.title),
+          e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.5,marginBottom:10}},g.result||""),
+          e("div",{style:{fontSize:10,color:"#64748b",marginBottom:10,fontStyle:"italic"}},"See the HOLDINGS and stats panels for the new portfolio."),
+          e("button",{className:"btn btn-p btn-full",onClick:()=>setOptView("picker")},"Optimize for something else →")
+        );})(),
         profile&&e("div",{className:"info-box",style:{fontSize:10,marginTop:7}},"Profile constraints: max "+profile.maxPos+"% per position · max β "+profile.maxBeta)
       )
     ),
