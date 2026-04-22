@@ -652,6 +652,7 @@ function Discovery({profile,ports,onAdd}){
   const[searchLoading,setSearchLoading]=useState(false);
   const[addingTicker,setAddingTicker]=useState(null);
   const[addError,setAddError]=useState(null);
+  const[howOpen,setHowOpen]=useState(false);
   const searchRef=useRef(null);
   const skipNextSearch=useRef(false);
 
@@ -731,6 +732,26 @@ function Discovery({profile,ports,onAdd}){
         e("div",{style:{display:"flex",gap:6,alignItems:"center",flexShrink:0}},
           e("button",{className:"btn btn-xs"+(showFactors?" btn-p":""),onClick:()=>setShowFactors(!showFactors),style:{fontSize:9}},showFactors?"Hide Factors ▲":"⚙ Factor Weights ▼"),
           [["70+ Strong","rgba(52,211,153,.1)","#34d399"],["45-69 OK","rgba(251,191,36,.08)","#fbbf24"],["<45 Poor","rgba(248,113,113,.08)","#f87171"]].map(([l,bg,col])=>e("span",{key:l,style:{fontSize:9,padding:"2px 7px",background:bg,color:col,borderRadius:7}},l))
+        )
+      ),
+      !howOpen&&e("div",{onClick:()=>setHowOpen(true),style:{cursor:"pointer",fontSize:12,color:"#94a3b8",padding:"6px 0",display:"flex",alignItems:"center",gap:6,marginBottom:4}},
+        e("span",{style:{fontSize:14}},"ℹ"),
+        "These US large-cap stocks and ETFs are matched to your profile.",
+        e("span",{style:{color:"#a5b4fc"}}," Click to see how →")
+      ),
+      howOpen&&e("div",{style:{background:"rgba(99,102,241,.04)",border:"1px solid rgba(99,102,241,.1)",borderRadius:10,padding:14,marginBottom:10,marginTop:4,position:"relative"}},
+        e("button",{onClick:()=>setHowOpen(false),style:{position:"absolute",top:8,right:10,background:"none",border:"none",color:"#64748b",fontSize:11,cursor:"pointer",fontFamily:"'DM Sans',sans-serif"}},"Hide"),
+        e("div",{style:{marginBottom:10}},
+          e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:4,letterSpacing:.3}},"What's in this list"),
+          e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.5}},"Starting from major US large-cap stocks and widely-held ETFs. Filtered for liquidity and data completeness.")
+        ),
+        e("div",{style:{marginBottom:10}},
+          e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:4,letterSpacing:.3}},"How fit scores are calculated"),
+          e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.5}},"Each asset is scored against your profile on factor alignment (momentum, quality, value, low volatility, yield), risk band match, and horizon compatibility. Higher fit = better match for your specific profile.")
+        ),
+        e("div",null,
+          e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:4,letterSpacing:.3}},"How to adjust"),
+          e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.5}},"Use the Factor Weights panel above the table to change how each factor affects the score. Growth profiles weight momentum more; income profiles weight yield more.")
         )
       ),
       showFactors&&e(FactorSliders,{weights:factorW,onChange:setFactorW,goal:profile?.goal||"Balanced"}),
