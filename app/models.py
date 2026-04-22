@@ -183,6 +183,9 @@ class ScreenedAssetResponse(BaseModel):
     pb_ratio: float | None
     earnings_yield: float | None
     earnings_date: str | None = None
+    dividend_growth_5y: float | None = None
+    debt_to_equity: float | None = None
+    revenue_growth: float | None = None
     z_momentum: float
     z_quality: float
     z_value: float

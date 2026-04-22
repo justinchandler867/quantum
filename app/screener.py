@@ -187,6 +187,32 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
                 except (ValueError, TypeError, OSError, OverflowError):
                     pass
 
+                # Debt/equity: yfinance sometimes returns as percent (e.g., 85) rather than ratio (0.85)
+                dte = info.get("debtToEquity")
+                if dte is not None and dte > 5:
+                    dte = dte / 100
+                # Revenue growth: yfinance returns as decimal (0.082 = 8.2%)
+                rev_growth = info.get("revenueGrowth")
+                if rev_growth is not None:
+                    rev_growth = rev_growth * 100
+
+                # 5Y dividend CAGR — compute from dividend history, excluding
+                # the current (incomplete) calendar year
+                div_growth_5y = None
+                try:
+                    divs = t.dividends
+                    if divs is not None and len(divs) > 0:
+                        annual = divs.groupby(divs.index.year).sum()
+                        annual = annual[annual.index < datetime.now().year].tail(5)
+                        if len(annual) >= 2:
+                            years = len(annual) - 1
+                            earliest = float(annual.iloc[0])
+                            latest = float(annual.iloc[-1])
+                            if earliest > 0 and years > 0:
+                                div_growth_5y = ((latest / earliest) ** (1 / years) - 1) * 100
+                except Exception:
+                    pass
+
                 records.append({
                     "ticker": ticker_str,
                     "name": info.get("shortName", info.get("longName", ticker_str)),
@@ -204,6 +230,9 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
                         else None
                     ),
                     "earnings_date": earnings_date,
+                    "dividend_growth_5y": div_growth_5y,
+                    "debt_to_equity": dte,
+                    "revenue_growth": rev_growth,
                 })
             except Exception as e:
                 logger.debug(f"Skipping {ticker_str}: {e}")
@@ -529,6 +558,9 @@ def run_screening_pipeline(
             pb_ratio=_safe_round(row.get("pb_ratio")),
             earnings_yield=_safe_round(row.get("earnings_yield")),
             earnings_date=row.get("earnings_date") if isinstance(row.get("earnings_date"), str) else None,
+            dividend_growth_5y=_safe_round(row.get("dividend_growth_5y")),
+            debt_to_equity=_safe_round(row.get("debt_to_equity")),
+            revenue_growth=_safe_round(row.get("revenue_growth")),
             z_momentum=round(float(row.get("z_momentum", 0)), 3),
             z_quality=round(float(row.get("z_quality", 0)), 3),
             z_value=round(float(row.get("z_value", 0)), 3),

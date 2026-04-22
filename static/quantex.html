@@ -365,6 +365,9 @@ function mapScreened(item) {
     zVal: item.z_value || 0, zVol: item.z_low_vol || 0, zYield: item.z_yield || 0,
     pe: item.pe_ratio, fpe: item.forward_pe, mktCap: item.market_cap,
     earnDate: item.earnings_date || null,
+    divGrowth: item.dividend_growth_5y,
+    debtEq: item.debt_to_equity,
+    revGrowth: item.revenue_growth,
     maxDD: item.max_drawdown || 0,
   };
 }
@@ -790,6 +793,7 @@ function Discovery({profile,ports,onAdd}){
           TH("fit","FIT"),TH("id","TICKER"),e("th",null,"NAME"),e("th",null,"TYPE"),
           TH("ret","1Y RET"),TH("vol","VOL"),TH("beta","BETA"),TH("sh","SHARPE"),TH("yld","YIELD"),
           TH("pe","P/E"),e("th",null,"NEXT EARNINGS"),
+          e("th",null,"DIV GROWTH"),TH("debtEq","DEBT/EQ"),TH("revGrowth","REV GROWTH"),
           e("th",null,"RSI"),e("th",null,"SIGNAL"),e("th",null,"ADD TO")
         )),
         e("tbody",null,rows.map(a=>{
@@ -816,6 +820,9 @@ function Discovery({profile,ports,onAdd}){
             e("td",null,a.yld.toFixed(1)+"%"),
             e("td",null,a.pe?a.pe.toFixed(1):"—"),
             e("td",{style:earnCellStyle||undefined},earnLabel),
+            e("td",{style:{color:a.divGrowth==null?"#64748b":a.divGrowth>5?"#1D9E75":a.divGrowth>=0?"#f59e0b":"#ef4444"}},a.divGrowth==null?"—":a.divGrowth.toFixed(1)+"%"),
+            e("td",{style:{color:a.debtEq==null?"#64748b":a.debtEq<0.5?"#1D9E75":a.debtEq<=1.5?"#f59e0b":"#ef4444"}},a.debtEq==null?"—":a.debtEq.toFixed(2)),
+            e("td",{style:{color:a.revGrowth==null?"#64748b":a.revGrowth>5?"#1D9E75":a.revGrowth>=0?"#f59e0b":"#ef4444"}},a.revGrowth==null?"—":(a.revGrowth>0?"+":"")+a.revGrowth.toFixed(1)+"%"),
             e("td",{style:{color:a.rsi>70?"#ef4444":a.rsi<30?"#1D9E75":"#94a3b8"}},a.rsi||"—"),
             e("td",{style:{color:SIG[a.sig]||"#f59e0b",fontSize:10,fontWeight:"bold"}},a.sig),
             e("td",null,e("div",{style:{display:"flex",gap:3}},
