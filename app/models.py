@@ -438,6 +438,22 @@ class TickerAddRequest(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=10)
 
 
+class NewsRequest(BaseModel):
+    symbol: str = Field(..., min_length=1, max_length=10)
+
+
+class NewsItem(BaseModel):
+    title: str
+    link: str
+    publisher: str
+    published: str | None = None
+    summary: str | None = None
+
+
+class NewsResponse(BaseModel):
+    items: list[NewsItem] = Field(default_factory=list)
+
+
 class TickerAddResponse(BaseModel):
     id: str
     n: str

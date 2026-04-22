@@ -911,6 +911,18 @@ function polylinePoints(arr,cx,cy){const pts=[];for(let i=0;i<arr.length;i++)if(
 // Axis tick helpers
 const MONTH_ABBR=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const DOW_ABBR=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+function relTime(iso){
+  if(!iso)return "";
+  const d=new Date(iso);
+  if(isNaN(d.getTime()))return "";
+  const diff=(Date.now()-d.getTime())/1000;
+  if(diff<60)return "just now";
+  if(diff<3600)return Math.round(diff/60)+" min ago";
+  if(diff<86400)return Math.round(diff/3600)+" hr ago";
+  if(diff<86400*7)return Math.round(diff/86400)+" days ago";
+  if(diff<86400*30)return Math.round(diff/86400/7)+" wk ago";
+  return Math.round(diff/86400/30)+" mo ago";
+}
 function formatDateTick(dateStr,range){
   const d=new Date(dateStr);
   if(range==="1W")return DOW_ABBR[d.getUTCDay()];
@@ -957,6 +969,9 @@ function TickerChart({ticker,name,onClose}){
   const[loading,setLoading]=useState(false);
   const[err,setErr]=useState(null);
   const[showConsensus,setShowConsensus]=useState(false);
+  const[news,setNews]=useState(null);
+  const[newsLoading,setNewsLoading]=useState(false);
+  const[showAllNews,setShowAllNews]=useState(false);
 
   const[size,setSize]=useState(()=>{
     try{
@@ -983,6 +998,16 @@ function TickerChart({ticker,name,onClose}){
       .finally(()=>{if(!cancelled)setLoading(false);});
     return()=>{cancelled=true;};
   },[ticker,range,wantVolume]);
+
+  useEffect(()=>{
+    let cancelled=false;
+    setNewsLoading(true);setNews(null);setShowAllNews(false);
+    apiFetch("/api/ticker/news",{symbol:ticker})
+      .then(d=>{if(!cancelled)setNews(d.items||[]);})
+      .catch(()=>{if(!cancelled)setNews([]);})
+      .finally(()=>{if(!cancelled)setNewsLoading(false);});
+    return()=>{cancelled=true;};
+  },[ticker]);
 
   useEffect(()=>{
     const h=ev=>{
@@ -1297,7 +1322,20 @@ function TickerChart({ticker,name,onClose}){
           e("div",{style:{marginTop:14,padding:"10px 12px",background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)",borderRadius:8,fontSize:10,color:"#fbbf24",lineHeight:1.55,fontWeight:"bold"}},"This describes what the technical indicators are showing right now. It does not predict future prices or constitute investment advice. Always do your own research.")
         )
       ),
-      macdPanel,rsiPanel,stochPanel,rocPanel
+      macdPanel,rsiPanel,stochPanel,rocPanel,
+      e("div",{style:{marginTop:16,borderTop:"1px solid #1a2540",paddingTop:12}},
+        e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:8,letterSpacing:.5}},"RECENT NEWS"),
+        newsLoading&&e("div",{style:{color:"#475569",fontSize:11,textAlign:"center",padding:"12px 0"}},e("span",{className:"spin"},"◌")," Loading news..."),
+        !newsLoading&&news&&news.length===0&&e("div",{style:{color:"#64748b",fontSize:11,padding:"12px 0",textAlign:"center"}},"No recent news for this ticker"),
+        !newsLoading&&news&&news.length>0&&news.slice(0,showAllNews?10:5).map((n,i)=>
+          e("div",{key:i,style:{padding:"10px 0",borderBottom:"1px solid #0a0f1c"}},
+            e("a",{href:n.link,target:"_blank",rel:"noopener noreferrer",style:{color:"#e2e8f0",fontSize:12,fontWeight:600,textDecoration:"none",lineHeight:1.4,display:"block",marginBottom:4}},n.title),
+            e("div",{style:{fontSize:10,color:"#64748b",marginBottom:4}},n.publisher,n.published?" · "+relTime(n.published):""),
+            n.summary&&e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.5}},n.summary.length>140?n.summary.slice(0,140)+"…":n.summary)
+          )
+        ),
+        !newsLoading&&news&&news.length>5&&!showAllNews&&e("button",{onClick:()=>setShowAllNews(true),style:{background:"none",border:"none",color:"#a5b4fc",fontSize:11,cursor:"pointer",marginTop:6,padding:"6px 0",fontFamily:"'DM Sans',sans-serif"}},"Show all "+news.length+" →")
+      )
       ),
       e("div",{onMouseDown:onHandleDown,title:"Drag to resize",style:{position:"absolute",right:4,bottom:4,width:16,height:16,cursor:"nwse-resize",opacity:.6,zIndex:1}},
         e("svg",{width:16,height:16,viewBox:"0 0 16 16",style:{display:"block"}},

@@ -5,6 +5,7 @@ Correlation, covariance, and diagnostics API endpoints.
 import json
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -58,6 +59,9 @@ from app.models import (
     SearchResult,
     TickerAddRequest,
     TickerAddResponse,
+    NewsRequest,
+    NewsItem,
+    NewsResponse,
 )
 from app.data_ingest import (
     fetch_prices,
@@ -618,6 +622,78 @@ async def add_ticker(req: TickerAddRequest):
         maxDD=round(max_dd, 2),
     )
 
+    cache_set(ck, response.model_dump(), CACHE_TTL_DAILY)
+    return response
+
+
+@app.post("/api/ticker/news", response_model=NewsResponse)
+async def ticker_news(req: NewsRequest):
+    """Return top 10 recent news items for a ticker via yfinance.
+    Cached daily. Returns empty list on failure rather than erroring."""
+    symbol = req.symbol.strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=422, detail="Empty symbol")
+
+    ck = cache_key("ticker_news", [symbol])
+    cached = cache_get(ck)
+    if cached is not None:
+        return NewsResponse(**cached)
+
+    import yfinance as yf
+    items: list[NewsItem] = []
+    try:
+        raw = yf.Ticker(symbol).news or []
+        for article in raw[:10]:
+            title = None
+            link = None
+            publisher = None
+            published = None
+            summary = None
+
+            # Newer yfinance wraps fields in a 'content' sub-dict
+            content = article.get("content") if isinstance(article, dict) else None
+            if isinstance(content, dict):
+                title = content.get("title")
+                summary = content.get("summary") or content.get("description")
+                published = content.get("pubDate")
+                provider_obj = content.get("provider") or {}
+                if isinstance(provider_obj, dict):
+                    publisher = provider_obj.get("displayName")
+                url_obj = content.get("canonicalUrl") or content.get("clickThroughUrl") or {}
+                if isinstance(url_obj, dict):
+                    link = url_obj.get("url")
+
+            # Older yfinance uses flat keys
+            if not title:
+                title = article.get("title")
+            if not link:
+                link = article.get("link")
+            if not publisher:
+                publisher = article.get("publisher")
+            if not published:
+                ts = article.get("providerPublishTime")
+                if ts:
+                    try:
+                        published = datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+                    except (ValueError, TypeError, OSError, OverflowError):
+                        published = None
+            if not summary:
+                summary = article.get("summary")
+
+            if not title or not link:
+                continue
+
+            items.append(NewsItem(
+                title=title,
+                link=link,
+                publisher=publisher or "Unknown",
+                published=published,
+                summary=summary,
+            ))
+    except Exception as exc:
+        logger.debug(f"yfinance news({symbol}) failed: {exc}")
+
+    response = NewsResponse(items=items)
     cache_set(ck, response.model_dump(), CACHE_TTL_DAILY)
     return response
 
