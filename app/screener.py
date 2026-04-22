@@ -10,6 +10,7 @@ Output: ranked shortlist of 30-40 candidates with scores and metadata.
 """
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional
 
 import numpy as np
@@ -176,6 +177,16 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
                 if not info or info.get("regularMarketPrice") is None:
                     continue
 
+                earnings_date = None
+                try:
+                    ts = info.get("earningsTimestamp") or info.get("earningsTimestampStart")
+                    if ts:
+                        dt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+                        if dt > datetime.now(tz=timezone.utc):
+                            earnings_date = dt.strftime("%Y-%m-%d")
+                except (ValueError, TypeError, OSError, OverflowError):
+                    pass
+
                 records.append({
                     "ticker": ticker_str,
                     "name": info.get("shortName", info.get("longName", ticker_str)),
@@ -192,6 +203,7 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
                         1.0 / info["trailingPE"] if info.get("trailingPE") and info["trailingPE"] > 0
                         else None
                     ),
+                    "earnings_date": earnings_date,
                 })
             except Exception as e:
                 logger.debug(f"Skipping {ticker_str}: {e}")
@@ -516,6 +528,7 @@ def run_screening_pipeline(
             forward_pe=_safe_round(row.get("forward_pe")),
             pb_ratio=_safe_round(row.get("pb_ratio")),
             earnings_yield=_safe_round(row.get("earnings_yield")),
+            earnings_date=row.get("earnings_date") if isinstance(row.get("earnings_date"), str) else None,
             z_momentum=round(float(row.get("z_momentum", 0)), 3),
             z_quality=round(float(row.get("z_quality", 0)), 3),
             z_value=round(float(row.get("z_value", 0)), 3),

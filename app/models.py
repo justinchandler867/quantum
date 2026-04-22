@@ -182,6 +182,7 @@ class ScreenedAssetResponse(BaseModel):
     forward_pe: float | None
     pb_ratio: float | None
     earnings_yield: float | None
+    earnings_date: str | None = None
     z_momentum: float
     z_quality: float
     z_value: float

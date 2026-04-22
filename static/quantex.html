@@ -360,6 +360,7 @@ function mapScreened(item) {
     zMom: item.z_momentum || 0, zQual: item.z_quality || 0,
     zVal: item.z_value || 0, zVol: item.z_low_vol || 0, zYield: item.z_yield || 0,
     pe: item.pe_ratio, fpe: item.forward_pe, mktCap: item.market_cap,
+    earnDate: item.earnings_date || null,
     maxDD: item.max_drawdown || 0,
   };
 }
@@ -784,10 +785,21 @@ function Discovery({profile,ports,onAdd}){
         e("thead",null,e("tr",null,
           TH("fit","FIT"),TH("id","TICKER"),e("th",null,"NAME"),e("th",null,"TYPE"),
           TH("ret","1Y RET"),TH("vol","VOL"),TH("beta","BETA"),TH("sh","SHARPE"),TH("yld","YIELD"),
+          TH("pe","P/E"),e("th",null,"NEXT EARNINGS"),
           e("th",null,"RSI"),e("th",null,"SIGNAL"),e("th",null,"ADD TO")
         )),
         e("tbody",null,rows.map(a=>{
           const fitCls=a.fit>=70?"fit-high":a.fit>=45?"fit-mid":"fit-low";
+          let earnCellStyle=null,earnLabel="—";
+          if(a.earnDate){
+            const d=new Date(a.earnDate);
+            const now=new Date();
+            const daysAway=(d-now)/(1000*60*60*24);
+            if(daysAway>=0&&daysAway<=90){
+              earnLabel=MONTH_ABBR[d.getUTCMonth()]+" "+d.getUTCDate();
+              if(daysAway<=7)earnCellStyle={background:"rgba(251,191,36,.12)",color:"#fbbf24",fontWeight:"bold"};
+            }
+          }
           return e("tr",{key:a.id,onClick:()=>setOpenTicker(a.id),style:{cursor:"pointer"}},
             e("td",null,e("div",{className:"fit-badge "+fitCls},a.fit)),
             e("td",{style:{fontWeight:"bold",color:TC[a.t]||"#818cf8"}},a.id),
@@ -798,6 +810,8 @@ function Discovery({profile,ports,onAdd}){
             e("td",null,a.beta.toFixed(2)),
             e("td",{style:{color:a.sh>=1?"#1D9E75":a.sh>=.5?"#f59e0b":"#ef4444",fontWeight:"bold"}},a.sh.toFixed(2)),
             e("td",null,a.yld.toFixed(1)+"%"),
+            e("td",null,a.pe?a.pe.toFixed(1):"—"),
+            e("td",{style:earnCellStyle||undefined},earnLabel),
             e("td",{style:{color:a.rsi>70?"#ef4444":a.rsi<30?"#1D9E75":"#94a3b8"}},a.rsi||"—"),
             e("td",{style:{color:SIG[a.sig]||"#f59e0b",fontSize:10,fontWeight:"bold"}},a.sig),
             e("td",null,e("div",{style:{display:"flex",gap:3}},
