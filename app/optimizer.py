@@ -20,6 +20,7 @@ class Objective(str, Enum):
     MAX_RETURN = "max_return"
     MIN_VOLATILITY = "min_vol"
     RISK_PARITY = "risk_parity"
+    MAX_DIVERSIFICATION = "max_diversification"
 
 
 @dataclass
@@ -118,11 +119,28 @@ def _risk_parity_objective(weights, expected_returns, cov_matrix, rf):
     return float(np.sum((rc - target) ** 2))
 
 
+def _neg_diversification_ratio(weights, expected_returns, cov_matrix, rf):
+    """
+    Negative diversification ratio — minimize to maximize DR.
+    DR(w) = (w · σ) / sqrt(wᵀ Σ w)
+    where σ is the vector of individual asset volatilities
+    (sqrt of diagonal of cov_matrix). DR ≥ 1, with higher values
+    meaning more diversification benefit.
+    """
+    sigma = np.sqrt(np.maximum(np.diag(cov_matrix), 0))
+    weighted_avg_vol = float(weights @ sigma)
+    port_vol = _portfolio_volatility(weights, cov_matrix)
+    if port_vol < 1e-10:
+        return 0.0
+    return -weighted_avg_vol / port_vol
+
+
 _OBJECTIVE_FNS = {
     Objective.MAX_SHARPE: _neg_sharpe,
     Objective.MAX_RETURN: _neg_return,
     Objective.MIN_VOLATILITY: _volatility,
     Objective.RISK_PARITY: _risk_parity_objective,
+    Objective.MAX_DIVERSIFICATION: _neg_diversification_ratio,
 }
 
 

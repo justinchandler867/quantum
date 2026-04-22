@@ -86,7 +86,7 @@ class ProfileConstraintsInput(BaseModel):
 
 class OptimizeRequest(BaseModel):
     tickers: list[str] = Field(..., min_length=2, max_length=50)
-    objective: str = Field("max_sharpe", pattern="^(max_sharpe|max_return|min_vol|risk_parity)$")
+    objective: str = Field("max_sharpe", pattern="^(max_sharpe|max_return|min_vol|risk_parity|max_diversification)$")
     risk_score: int | None = Field(None, ge=0, le=100, description="Investor risk score → auto-computes λ and constraints")
     constraints: ProfileConstraintsInput | None = None
     window: int = Field(252, ge=60, le=1260)

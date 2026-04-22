@@ -514,7 +514,7 @@ function optimizeLocal(tickers,goal,maxPos){
 
 // Backend optimizer (scipy SLSQP via /api/optimize)
 async function optimizeBackend(tickers, goal, maxPos, riskScore, currentWeights) {
-  const objMap = { sharpe: "max_sharpe", "return": "max_return", minvol: "min_vol", riskparity: "risk_parity" };
+  const objMap = { sharpe: "max_sharpe", "return": "max_return", minvol: "min_vol", riskparity: "risk_parity", maxdiv: "max_diversification" };
   const data = await apiFetch("/api/optimize", {
     tickers,
     objective: objMap[goal] || "max_sharpe",
@@ -1388,6 +1388,7 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
     {id:"sharpe",title:"Best return per unit of risk",sub:"Finds the portfolio with the highest Sharpe ratio. Good if you want to maximize growth while controlling volatility.",result:"Found the weights that maximize (return − risk-free) ÷ volatility — the highest Sharpe ratio your constraints allow."},
     {id:"minvol",title:"Lowest possible risk",sub:"Finds the portfolio with minimum volatility. Good if preserving capital matters more than growth.",result:"Minimized portfolio volatility — the most stable combination of your holdings."},
     {id:"riskparity",title:"Spread risk evenly across holdings",sub:"Each position contributes equally to total portfolio risk. Good for diversification without concentrating bets.",result:"Equalized risk contributions across positions — no single position dominates."},
+    {id:"maxdiv",title:"Maximum diversification benefit",sub:"Maximizes the diversification ratio — how much the portfolio's volatility is reduced versus the weighted average of its parts. Good for capturing cross-asset variance benefits.",result:"Maximized the diversification ratio — spread weights to capture the largest reduction in portfolio volatility from combining your assets."},
   ];
   const tickers=Object.keys(weights);
   const runOpt=async id=>{
