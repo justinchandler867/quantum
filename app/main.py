@@ -2,8 +2,10 @@
 Quantex Backend — FastAPI Application
 Correlation, covariance, and diagnostics API endpoints.
 """
+import asyncio
 import json
 import logging
+import threading
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -96,6 +98,7 @@ _store = {
     "stress_returns": None,
     "stress_mask": None,
 }
+_store_lock = threading.Lock()
 
 
 @asynccontextmanager
@@ -151,12 +154,13 @@ def _ensure_data(tickers: list[str]) -> None:
     stress_mask = identify_stress_windows(returns)
     normal_returns, stress_returns = split_returns_by_regime(returns, stress_mask)
 
-    _store["prices"] = prices
-    _store["volumes"] = volumes
-    _store["returns"] = returns
-    _store["normal_returns"] = normal_returns
-    _store["stress_returns"] = stress_returns
-    _store["stress_mask"] = stress_mask
+    with _store_lock:
+        _store["prices"] = prices
+        _store["volumes"] = volumes
+        _store["returns"] = returns
+        _store["normal_returns"] = normal_returns
+        _store["stress_returns"] = stress_returns
+        _store["stress_mask"] = stress_mask
 
     logger.info(
         f"Data loaded: {returns.shape[1]} tickers, {returns.shape[0]} days, "
@@ -415,9 +419,22 @@ async def get_prices(req: PricesRequest):
     if cached:
         return PricesResponse(**cached)
 
-    _ensure_data(req.tickers)
-    prices_df = _store["prices"]
-    volumes_df = _store["volumes"]
+    store_prices = _store["prices"]
+    needs_fresh = store_prices is None or any(
+        t not in store_prices.columns for t in req.tickers
+    )
+    if len(req.tickers) <= 5 and needs_fresh:
+        loop = asyncio.get_running_loop()
+        prices_df, volumes_df = await loop.run_in_executor(
+            None,
+            lambda: fetch_prices(
+                req.tickers, include_hedges=False, return_volumes=True
+            ),
+        )
+    else:
+        _ensure_data(req.tickers)
+        prices_df = _store["prices"]
+        volumes_df = _store["volumes"]
 
     available = [t for t in req.tickers if t in prices_df.columns]
     skipped = [t for t in req.tickers if t not in prices_df.columns]
@@ -1022,22 +1039,26 @@ async def screen_universe(req: ScreenRequest):
 
     # Ensure we have return data — use whatever tickers are already loaded,
     # or load the screening universe
+    loop = asyncio.get_running_loop()
     if _store["returns"] is None:
         # Need to load data first
         from app.screener import load_nasdaq_tickers
         tickers = req.tickers or load_nasdaq_tickers()
-        _ensure_data(tickers)
+        await loop.run_in_executor(None, _ensure_data, tickers)
 
     returns = _store["returns"]
 
     try:
-        result = run_screening_pipeline(
-            returns=returns,
-            goal=req.goal,
-            risk_score=req.risk_score,
-            time_horizon_years=req.time_horizon_years,
-            max_results=req.max_results,
-            tickers=req.tickers,
+        result = await loop.run_in_executor(
+            None,
+            lambda: run_screening_pipeline(
+                returns=returns,
+                goal=req.goal,
+                risk_score=req.risk_score,
+                time_horizon_years=req.time_horizon_years,
+                max_results=req.max_results,
+                tickers=req.tickers,
+            ),
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
