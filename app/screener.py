@@ -63,6 +63,12 @@ class ScreenedAsset:
     pb_ratio: float | None
     earnings_yield: float | None
 
+    # Calendar + growth/leverage extras (optional — may be missing for some tickers)
+    earnings_date: str | None = None
+    dividend_growth_5y: float | None = None
+    debt_to_equity: float | None = None
+    revenue_growth: float | None = None
+
     # Factor z-scores
     z_momentum: float = 0.0
     z_quality: float = 0.0
