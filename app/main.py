@@ -831,6 +831,14 @@ async def optimize(req: OptimizeRequest):
         # Get expected returns and betas from historical data
         exp_ret, betas = _get_expected_returns_and_betas(returns, cov_result.tickers)
 
+        # Apply 2026 Co-CIO Outlook sector tilts to expected returns if requested
+        if req.apply_outlook:
+            from app.coc_io_outlook import apply_outlook_tilts
+            from app.screener import _SECTORS
+            sectors_map = {t: (_SECTORS.get(t) or {}).get("sector") for t in cov_result.tickers}
+            exp_ret = apply_outlook_tilts(exp_ret, cov_result.tickers, sectors_map)
+            logger.info(f"Applied 2026 Co-CIO Outlook tilts to {len(cov_result.tickers)} tickers")
+
         # Map objective string to enum
         obj = Objective(req.objective)
 
@@ -873,6 +881,7 @@ async def optimize(req: OptimizeRequest):
         iterations=result.iterations,
         constraints_active=result.constraints_active,
         comparison=comparison,
+        apply_outlook=req.apply_outlook,
     )
 
 

@@ -93,6 +93,9 @@ class OptimizeRequest(BaseModel):
     include_current_weights: dict[str, float] | None = Field(
         None, description="Current weights for comparison (ticker → pct 0-100)"
     )
+    apply_outlook: bool = Field(
+        False, description="Apply 2026 Co-CIO Outlook sector tilts to expected returns"
+    )
 
 
 class OptimizeResponse(BaseModel):
@@ -110,6 +113,7 @@ class OptimizeResponse(BaseModel):
     iterations: int
     constraints_active: list[str]
     comparison: dict | None = None     # before/after if current weights provided
+    apply_outlook: bool = False        # whether 2026 Co-CIO Outlook tilts were applied
 
 
 class MultiOptimizeRequest(BaseModel):
