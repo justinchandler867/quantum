@@ -513,13 +513,14 @@ function optimizeLocal(tickers,goal,maxPos){
 }
 
 // Backend optimizer (scipy SLSQP via /api/optimize)
-async function optimizeBackend(tickers, goal, maxPos, riskScore, currentWeights) {
+async function optimizeBackend(tickers, goal, maxPos, riskScore, currentWeights, applyOutlook) {
   const objMap = { sharpe: "max_sharpe", "return": "max_return", minvol: "min_vol", riskparity: "risk_parity", maxdiv: "max_diversification" };
   const data = await apiFetch("/api/optimize", {
     tickers,
     objective: objMap[goal] || "max_sharpe",
     risk_score: riskScore || null,
     include_current_weights: currentWeights || null,
+    apply_outlook: !!applyOutlook,
   });
   // Convert weights from 0-1 to 0-100 integer percentages
   const wo = {};
@@ -1459,18 +1460,23 @@ function PortfolioChart({weights}){
 function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
   const[optView,setOptView]=useState("picker");
   const[lastGoal,setLastGoal]=useState(null);
+  const[useOutlook,setUseOutlook]=useState(false);
+  const[lastOutlook,setLastOutlook]=useState(false);
+  const[showOutlookInfo,setShowOutlookInfo]=useState(false);
   const OPT_GOALS=[
     {id:"sharpe",title:"Best return per unit of risk",sub:"Finds the portfolio with the highest Sharpe ratio. Good if you want to maximize growth while controlling volatility.",result:"Found the weights that maximize (return − risk-free) ÷ volatility — the highest Sharpe ratio your constraints allow."},
     {id:"minvol",title:"Lowest possible risk",sub:"Finds the portfolio with minimum volatility. Good if preserving capital matters more than growth.",result:"Minimized portfolio volatility — the most stable combination of your holdings."},
     {id:"riskparity",title:"Spread risk evenly across holdings",sub:"Each position contributes equally to total portfolio risk. Good for diversification without concentrating bets.",result:"Equalized risk contributions across positions — no single position dominates."},
     {id:"maxdiv",title:"Maximum diversification benefit",sub:"Maximizes the diversification ratio — how much the portfolio's volatility is reduced versus the weighted average of its parts. Good for capturing cross-asset variance benefits.",result:"Maximized the diversification ratio — spread weights to capture the largest reduction in portfolio volatility from combining your assets."},
   ];
+  const OUTLOOK_TILTS=[["Technology","-1.0%"],["Financial Services","+1.5%"],["Healthcare","+1.0%"],["Industrials","+0.5%"],["Consumer Cyclical","-0.5%"],["Consumer Defensive","+0.5%"],["Fixed Income","+0.5%"]];
   const tickers=Object.keys(weights);
   const runOpt=async id=>{
     if(tickers.length<2)return;
     setLastGoal(id);
+    setLastOutlook(useOutlook);
     setOptView("running");
-    try{await onOpt(id,profile?.maxPos||30);}
+    try{await onOpt(id,profile?.maxPos||30,useOutlook);}
     finally{setOptView("results");}
   };
   const stats=tickers.length>0?calcStats(weights):null;
@@ -1490,8 +1496,18 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
       ),
       e("div",{className:"card"},
         e("div",{className:"card-title"},"OPTIMIZER"),
+        e("div",{style:{display:"flex",alignItems:"center",gap:6,marginBottom:10,padding:"7px 10px",background:useOutlook?"rgba(99,102,241,.12)":"rgba(148,163,184,.05)",border:"1px solid "+(useOutlook?"rgba(99,102,241,.4)":"rgba(148,163,184,.15)"),borderRadius:8,transition:"background .15s,border-color .15s"}},
+          e("button",{onClick:()=>setUseOutlook(x=>!x),title:"Toggle 2026 Co-CIO Outlook tilts",style:{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",padding:0,flex:1,textAlign:"left",fontFamily:"inherit"}},
+            e("span",{style:{display:"inline-block",width:26,height:14,borderRadius:7,background:useOutlook?"#6366f1":"#334155",position:"relative",transition:"background .15s",flexShrink:0}},
+              e("span",{style:{position:"absolute",top:1,left:useOutlook?13:1,width:12,height:12,borderRadius:6,background:"#fff",transition:"left .15s"}})
+            ),
+            e("span",{style:{fontSize:11,fontWeight:"bold",color:useOutlook?"#a5b4fc":"#94a3b8",letterSpacing:.3}},"2026 Co-CIO Outlook · ",useOutlook?"On":"Off")
+          ),
+          e("button",{onClick:()=>setShowOutlookInfo(true),title:"What is this?",style:{background:"none",border:"1px solid rgba(148,163,184,.3)",color:"#94a3b8",cursor:"pointer",fontSize:10,width:18,height:18,borderRadius:9,padding:0,lineHeight:1,fontFamily:"inherit",flexShrink:0}},"ⓘ")
+        ),
         optView==="picker"&&e(React.Fragment,null,
           e("div",{style:{fontSize:11,color:"#64748b",marginBottom:10,lineHeight:1.5}},"What do you want to optimize for?"),
+          useOutlook&&e("div",{style:{fontSize:10,color:"#a5b4fc",marginBottom:8,padding:"4px 8px",background:"rgba(99,102,241,.08)",borderRadius:4,letterSpacing:.3}},"◈ Strategy will run under 2026 Co-CIO Outlook"),
           OPT_GOALS.map(g=>e("div",{
             key:g.id,
             className:"opt-goal-card"+(tickers.length<2?" disabled":""),
@@ -1504,17 +1520,35 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
         ),
         optView==="running"&&e("div",{style:{textAlign:"center",padding:"20px 0"}},
           e("div",{style:{fontSize:11,color:"#94a3b8",marginBottom:10}},"Optimizing for:"),
-          e("div",{style:{fontSize:13,color:"#a5b4fc",fontWeight:"bold",marginBottom:12}},(OPT_GOALS.find(g=>g.id===lastGoal)||{}).title),
-          e("div",{style:{fontSize:14,color:"#818cf8"}},e("span",{className:"spin"},"◌")," Working…")
+          e("div",{style:{fontSize:13,color:"#a5b4fc",fontWeight:"bold",marginBottom:6}},(OPT_GOALS.find(g=>g.id===lastGoal)||{}).title),
+          useOutlook&&e("div",{style:{fontSize:10,color:"#a5b4fc",marginBottom:10,letterSpacing:.3}},"under 2026 Co-CIO Outlook"),
+          e("div",{style:{fontSize:14,color:"#818cf8",marginTop:6}},e("span",{className:"spin"},"◌")," Working…")
         ),
         optView==="results"&&(()=>{const g=OPT_GOALS.find(x=>x.id===lastGoal)||{};return e(React.Fragment,null,
+          lastOutlook&&e("div",{style:{fontSize:10,color:"#a5b4fc",marginBottom:6,padding:"4px 8px",background:"rgba(99,102,241,.1)",border:"1px solid rgba(99,102,241,.3)",borderRadius:4,letterSpacing:.3,fontWeight:"bold"}},"◈ Optimized under 2026 Co-CIO Outlook"),
           e("div",{style:{fontSize:10,color:"#64748b",marginBottom:3,letterSpacing:.3}},"OPTIMIZED FOR"),
           e("div",{style:{fontSize:13,fontWeight:"bold",color:"#a5b4fc",marginBottom:8}},g.title),
           e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.5,marginBottom:10}},g.result||""),
           e("div",{style:{fontSize:10,color:"#64748b",marginBottom:10,fontStyle:"italic"}},"See the HOLDINGS and stats panels for the new portfolio."),
           e("button",{className:"btn btn-p btn-full",onClick:()=>setOptView("picker")},"Optimize for something else →")
         );})(),
-        profile&&e("div",{className:"info-box",style:{fontSize:10,marginTop:7}},"Profile constraints: max "+profile.maxPos+"% per position · max β "+profile.maxBeta)
+        profile&&e("div",{className:"info-box",style:{fontSize:10,marginTop:7}},"Profile constraints: max "+profile.maxPos+"% per position · max β "+profile.maxBeta),
+        showOutlookInfo&&e("div",{onClick:()=>setShowOutlookInfo(false),style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:1200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+          e("div",{onClick:ev=>ev.stopPropagation(),style:{background:"#0b0f1e",border:"1px solid rgba(99,102,241,.25)",borderRadius:12,maxWidth:500,width:"100%",padding:20,position:"relative"}},
+            e("button",{onClick:()=>setShowOutlookInfo(false),title:"Close",style:{position:"absolute",top:8,right:10,background:"none",border:"none",color:"#94a3b8",fontSize:18,cursor:"pointer",padding:"2px 8px",lineHeight:1}},"✕"),
+            e("div",{style:{fontSize:14,fontWeight:700,color:"#a5b4fc",marginBottom:6,letterSpacing:.3}},"2026 Co-CIO Outlook"),
+            e("div",{style:{fontSize:10,color:"#64748b",marginBottom:14,fontStyle:"italic",lineHeight:1.4}},"Based on commentary from Fort Washington Co-CIOs Christopher Shipley & Brendan White, 2025-2026"),
+            e("div",{style:{fontSize:12,color:"#cbd5e1",lineHeight:1.65,marginBottom:14}},"Equity returns in 2026 should be driven by earnings growth rather than multiple expansion, with valuations arguably validated by improving earnings expectations. Stock-bond correlation is regime-shifting, requiring refreshed diversification assumptions. Selected sectors are tilted to reflect this view: overweights to Financial Services, Healthcare, Industrials, and Fixed Income; underweight to Technology to reflect mega-cap concentration risk."),
+            e("div",{style:{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:.5,marginBottom:6}},"SECTOR TILTS"),
+            e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11,marginBottom:14}},
+              e("tbody",null,OUTLOOK_TILTS.map(([sec,t])=>e("tr",{key:sec,style:{borderBottom:"1px solid #1a2540"}},
+                e("td",{style:{padding:"6px 4px",color:"#cbd5e1"}},sec),
+                e("td",{style:{padding:"6px 4px",textAlign:"right",fontWeight:"bold",fontFamily:"'JetBrains Mono',monospace",color:t.startsWith("+")?"#1D9E75":"#ef4444"}},t)
+              )))
+            ),
+            e("div",{style:{padding:"10px 12px",background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)",borderRadius:8,fontSize:10,color:"#fbbf24",lineHeight:1.55}},"These tilts reflect a synthesized interpretation of the cited commentary, not the firm's official portfolio. Educational use only.")
+          )
+        )
       )
     ),
     e("div",{className:"builder-right"},
@@ -3279,19 +3313,19 @@ function App({user,logout}){
   const updateW=(pn,id,v)=>setPorts(prev=>({...prev,[pn]:{...prev[pn],[id]:v}}));
 
   // Optimizer: try backend (SLSQP), fall back to local Monte Carlo
-  const optPort=async(pn,goal,maxPos)=>{
+  const optPort=async(pn,goal,maxPos,applyOutlook)=>{
     const t=Object.keys(ports[pn]);
     if(!t.length)return;
     if(backendOk){
       setOptLoading(true);
       try{
-        const result=await optimizeBackend(t,goal,maxPos,profile?.score,ports[pn]);
+        const result=await optimizeBackend(t,goal,maxPos,profile?.score,ports[pn],applyOutlook);
         setPorts(prev=>({...prev,[pn]:result.weights}));
         setOptLoading(false);return;
       }catch(err){console.warn("Backend optimizer failed, using local:",err.message);}
       setOptLoading(false);
     }
-    // Local fallback
+    // Local fallback (Outlook tilts are backend-only; local Monte Carlo ignores them)
     setPorts(prev=>({...prev,[pn]:optimizeLocal(t,goal,maxPos)}));
   };
 
@@ -3343,9 +3377,9 @@ function App({user,logout}){
         tab==="challenges"&&e(Challenges,{profile,ports,activePort:ap}),
         tab==="course"&&e(CourseHub,{profile,ports,activePort:ap}),
         tab==="compare"&&e(Compare,{ports}),
-        tab==="pA"&&e(PortTab,{name:"Portfolio A",weights:ports.A,profile,onUpdate:(id,v)=>updateW("A",id,v),onRemove:id=>rmFromPort("A",id),onOpt:(goal,mp)=>optPort("A",goal,mp),optLoading}),
-        tab==="pB"&&e(PortTab,{name:"Portfolio B",weights:ports.B,profile,onUpdate:(id,v)=>updateW("B",id,v),onRemove:id=>rmFromPort("B",id),onOpt:(goal,mp)=>optPort("B",goal,mp),optLoading}),
-        tab==="pC"&&e(PortTab,{name:"Portfolio C",weights:ports.C,profile,onUpdate:(id,v)=>updateW("C",id,v),onRemove:id=>rmFromPort("C",id),onOpt:(goal,mp)=>optPort("C",goal,mp),optLoading})
+        tab==="pA"&&e(PortTab,{name:"Portfolio A",weights:ports.A,profile,onUpdate:(id,v)=>updateW("A",id,v),onRemove:id=>rmFromPort("A",id),onOpt:(goal,mp,ao)=>optPort("A",goal,mp,ao),optLoading}),
+        tab==="pB"&&e(PortTab,{name:"Portfolio B",weights:ports.B,profile,onUpdate:(id,v)=>updateW("B",id,v),onRemove:id=>rmFromPort("B",id),onOpt:(goal,mp,ao)=>optPort("B",goal,mp,ao),optLoading}),
+        tab==="pC"&&e(PortTab,{name:"Portfolio C",weights:ports.C,profile,onUpdate:(id,v)=>updateW("C",id,v),onRemove:id=>rmFromPort("C",id),onOpt:(goal,mp,ao)=>optPort("C",goal,mp,ao),optLoading})
       ),
       e("div",{className:"side"},e(Advisor,{profile,ports,activePort:ap}))
     )
