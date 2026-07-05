@@ -711,7 +711,8 @@ function Discovery({profile,ports,onAdd}){
     }
   };
 
-  const defaultWeights={Growth:{momentum:.35,quality:.25,value:.15,low_vol:.10,yield:.15},Income:{momentum:.10,quality:.20,value:.15,low_vol:.20,yield:.35},Preservation:{momentum:.10,quality:.25,value:.15,low_vol:.35,yield:.15},Balanced:{momentum:.20,quality:.25,value:.20,low_vol:.20,yield:.15}};
+  // MUST match FACTOR_WEIGHTS_BY_GOAL in app/config.py — these drive the client-side re-rank preview.
+  const defaultWeights={Growth:{momentum:.50,quality:.20,value:.20,low_vol:.05,yield:.05},Income:{momentum:.00,quality:.20,value:.10,low_vol:.30,yield:.40},Preservation:{momentum:.00,quality:.20,value:.10,low_vol:.45,yield:.25},Balanced:{momentum:.20,quality:.20,value:.20,low_vol:.20,yield:.20}};
   const[factorW,setFactorW]=useState(defaultWeights[profile?.goal]||defaultWeights.Balanced);
   const[showFactors,setShowFactors]=useState(false);
   const TYPES=useMemo(()=>{
