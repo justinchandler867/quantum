@@ -116,6 +116,25 @@ class OptimizeResponse(BaseModel):
     apply_outlook: bool = False        # whether 2026 Co-CIO Outlook tilts were applied
 
 
+class StressTestRequest(BaseModel):
+    tickers: list[str] = Field(..., min_length=2, max_length=50)
+    weights: dict[str, float] = Field(..., description="Current weights as ticker → pct (0-100)")
+    window: int = Field(252, ge=60, le=1260)
+
+
+class StressMetrics(BaseModel):
+    expected_return: float       # annualized
+    volatility: float            # annualized
+    sharpe_ratio: float
+    max_drawdown: float          # negative number, fraction (e.g. -0.18 = -18%)
+
+
+class StressTestResponse(BaseModel):
+    baseline: StressMetrics
+    regime: StressMetrics
+    description: str
+
+
 class MultiOptimizeRequest(BaseModel):
     tickers: list[str] = Field(..., min_length=2, max_length=50)
     risk_score: int | None = Field(None, ge=0, le=100)

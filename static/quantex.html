@@ -1463,6 +1463,9 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
   const[useOutlook,setUseOutlook]=useState(false);
   const[lastOutlook,setLastOutlook]=useState(false);
   const[showOutlookInfo,setShowOutlookInfo]=useState(false);
+  const[stressResult,setStressResult]=useState(null);
+  const[stressLoading,setStressLoading]=useState(false);
+  const[stressError,setStressError]=useState(null);
   const OPT_GOALS=[
     {id:"sharpe",title:"Best return per unit of risk",sub:"Finds the portfolio with the highest Sharpe ratio. Good if you want to maximize growth while controlling volatility.",result:"Found the weights that maximize (return − risk-free) ÷ volatility — the highest Sharpe ratio your constraints allow."},
     {id:"minvol",title:"Lowest possible risk",sub:"Finds the portfolio with minimum volatility. Good if preserving capital matters more than growth.",result:"Minimized portfolio volatility — the most stable combination of your holdings."},
@@ -1479,6 +1482,16 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
     try{await onOpt(id,profile?.maxPos||30,useOutlook);}
     finally{setOptView("results");}
   };
+  const runStress=async()=>{
+    if(tickers.length<2)return;
+    setStressLoading(true);setStressError(null);setStressResult(null);
+    try{
+      const data=await apiFetch("/api/stress_test_2026",{tickers,weights});
+      setStressResult(data);
+    }catch(err){setStressError(err.message||"Stress test failed");}
+    finally{setStressLoading(false);}
+  };
+  const fmtPct=(x,signed)=>{const v=x*100;return (signed&&v>0?"+":"")+v.toFixed(2)+"%";};
   const stats=tickers.length>0?calcStats(weights):null;
   const total=Object.values(weights).reduce((a,b)=>a+b,0);
   if(!tickers.length)return e("div",{className:"card",style:{textAlign:"center",padding:36}},e("div",{style:{fontSize:22,marginBottom:9}},"📊"),e("div",{style:{color:"#475569"}},"No assets yet — go to Discovery and click + to add them here."));
@@ -1549,6 +1562,44 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
             e("div",{style:{padding:"10px 12px",background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)",borderRadius:8,fontSize:10,color:"#fbbf24",lineHeight:1.55}},"These tilts reflect a synthesized interpretation of the cited commentary, not the firm's official portfolio. Educational use only.")
           )
         )
+      ),
+      e("div",{className:"card"},
+        e("div",{className:"card-title"},"REGIME STRESS TEST"),
+        e("div",{style:{fontSize:11,color:"#64748b",marginBottom:10,lineHeight:1.5}},"How would this portfolio behave under the 2026 Co-CIO Outlook regime?"),
+        !stressLoading&&!stressResult&&e(React.Fragment,null,
+          e("button",{className:"btn btn-p btn-full",disabled:tickers.length<2,onClick:runStress},"Run Stress Test"),
+          tickers.length<2&&e("div",{style:{fontSize:10,color:"#475569",textAlign:"center",marginTop:6}},"Add at least 2 assets to run")
+        ),
+        stressLoading&&e("div",{style:{textAlign:"center",padding:"16px 0",fontSize:12,color:"#818cf8"}},
+          e("span",{className:"spin"},"◌")," Running 1,000-path Monte Carlo…"
+        ),
+        stressError&&e("div",{style:{fontSize:11,color:"#ef4444",padding:"8px 10px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.25)",borderRadius:6,marginBottom:8}},"⚠ "+stressError),
+        stressResult&&(()=>{
+          const b=stressResult.baseline,r=stressResult.regime;
+          const ROWS=[
+            ["Expected Return",fmtPct(b.expected_return,true),fmtPct(r.expected_return,true),r.expected_return>=b.expected_return],
+            ["Volatility",fmtPct(b.volatility),fmtPct(r.volatility),r.volatility<=b.volatility],
+            ["Sharpe Ratio",b.sharpe_ratio.toFixed(2),r.sharpe_ratio.toFixed(2),r.sharpe_ratio>=b.sharpe_ratio],
+            ["Est. Max Drawdown",fmtPct(b.max_drawdown),fmtPct(r.max_drawdown),r.max_drawdown>=b.max_drawdown],
+          ];
+          return e(React.Fragment,null,
+            e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11,marginBottom:10}},
+              e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540"}},
+                e("th",{style:{padding:"6px 4px",textAlign:"left",fontSize:9,color:"#475569",fontWeight:"bold",letterSpacing:.3}},""),
+                e("th",{style:{padding:"6px 4px",textAlign:"right",fontSize:9,color:"#94a3b8",fontWeight:"bold",letterSpacing:.3}},"CURRENT"),
+                e("th",{style:{padding:"6px 4px",textAlign:"right",fontSize:9,color:"#a5b4fc",fontWeight:"bold",letterSpacing:.3}},"2026 REGIME")
+              )),
+              e("tbody",null,ROWS.map(([lbl,bv,rv,better])=>e("tr",{key:lbl,style:{borderBottom:"1px solid #0a0f1c"}},
+                e("td",{style:{padding:"6px 4px",color:"#cbd5e1"}},lbl),
+                e("td",{style:{padding:"6px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#94a3b8"}},bv),
+                e("td",{style:{padding:"6px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:"bold",color:better?"#1D9E75":"#ef4444"}},rv)
+              )))
+            ),
+            e("div",{style:{fontSize:10,color:"#94a3b8",lineHeight:1.55,padding:"8px 10px",background:"rgba(99,102,241,.05)",border:"1px solid rgba(99,102,241,.15)",borderRadius:6,marginBottom:8}},stressResult.description),
+            e("div",{style:{fontSize:9,color:"#475569",marginBottom:8,fontStyle:"italic",lineHeight:1.4}},"Max drawdown is a median across 1,000 simulated one-year paths — expected behavior, not guaranteed."),
+            e("button",{className:"btn btn-d btn-full",onClick:()=>{setStressResult(null);setStressError(null);}},"Re-run")
+          );
+        })()
       )
     ),
     e("div",{className:"builder-right"},

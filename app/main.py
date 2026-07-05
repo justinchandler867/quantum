@@ -34,6 +34,9 @@ from app.models import (
     OptimizeResponse,
     MultiOptimizeRequest,
     MultiOptimizeResponse,
+    StressTestRequest,
+    StressTestResponse,
+    StressMetrics,
     FrontierRequest,
     FrontierResponse,
     ScreenRequest,
@@ -882,6 +885,110 @@ async def optimize(req: OptimizeRequest):
         constraints_active=result.constraints_active,
         comparison=comparison,
         apply_outlook=req.apply_outlook,
+    )
+
+
+def _monte_carlo_max_drawdown(
+    weights: np.ndarray,
+    annual_mean: np.ndarray,
+    annual_cov: np.ndarray,
+    n_paths: int = 1000,
+    days: int = 252,
+    seed: int = 42,
+) -> float:
+    """
+    Median max-drawdown across N simulated 1-year paths.
+
+    Daily returns drawn from multivariate normal with (mean/252, cov/252).
+    Portfolio log return per day = w · r; equity curve = exp(cumsum). Max
+    drawdown per path = min((equity - running_max)/running_max). The function
+    returns the median, which gives a typical-case rather than tail estimate.
+
+    Deterministic for a given seed so baseline and regime calls produce
+    apples-to-apples comparisons (the only difference between calls is the
+    distribution, not the random draws).
+    """
+    rng = np.random.default_rng(seed)
+    daily_mean = annual_mean / days
+    daily_cov = annual_cov / days
+    # Add a tiny ridge for numerical stability so multivariate_normal doesn't
+    # complain about non-PSD covariance from floating-point noise.
+    ridge = 1e-12 * np.eye(daily_cov.shape[0])
+    samples = rng.multivariate_normal(daily_mean, daily_cov + ridge, size=(n_paths, days))
+    port_daily = samples @ weights  # (n_paths, days)
+    equity = np.empty((n_paths, days + 1))
+    equity[:, 0] = 1.0
+    equity[:, 1:] = np.exp(np.cumsum(port_daily, axis=1))
+    run_max = np.maximum.accumulate(equity, axis=1)
+    drawdown = (equity - run_max) / run_max
+    return float(np.median(drawdown.min(axis=1)))
+
+
+@app.post("/api/stress_test_2026", response_model=StressTestResponse)
+async def stress_test_2026(req: StressTestRequest):
+    """
+    Compare the user's current portfolio under baseline (historical) assumptions
+    vs the 2026 Co-CIO Outlook regime — sector return tilts, sector vol scaling,
+    and a stock-bond correlation override. Max drawdown estimated via 1000-path
+    Monte Carlo over a 1-year horizon.
+    """
+    _ensure_data(req.tickers)
+    returns = _store["returns"]
+    normal_returns = _store["normal_returns"]
+    stress_returns = _store["stress_returns"]
+
+    try:
+        cov_result = build_covariance_matrix(
+            normal_returns, stress_returns, req.tickers,
+            lam=DEFAULT_LAMBDA, window=req.window,
+        )
+        tickers = cov_result.tickers
+        exp_ret, _betas = _get_expected_returns_and_betas(returns, tickers)
+
+        w = np.array([req.weights.get(t, 0.0) / 100.0 for t in tickers])
+        if w.sum() <= 0:
+            raise HTTPException(status_code=422, detail="Weights must sum to a positive value")
+        w = w / w.sum()
+
+        from app.coc_io_outlook import apply_regime, REGIME_2026
+        from app.screener import _SECTORS
+        sectors_map = {t: (_SECTORS.get(t) or {}).get("sector") for t in tickers}
+
+        # Baseline (historical) metrics
+        base_ret = float(w @ exp_ret)
+        base_vol = float(np.sqrt(max(w @ cov_result.matrix @ w, 0.0)))
+        base_sh = ((base_ret - RISK_FREE_RATE) / base_vol) if base_vol > 1e-10 else 0.0
+        base_mdd = _monte_carlo_max_drawdown(w, exp_ret, cov_result.matrix, seed=42)
+
+        # Regime-adjusted metrics
+        regime_ret_vec, regime_cov = apply_regime(exp_ret, cov_result.matrix, tickers, sectors_map)
+        regime_ret = float(w @ regime_ret_vec)
+        regime_vol = float(np.sqrt(max(w @ regime_cov @ w, 0.0)))
+        regime_sh = ((regime_ret - RISK_FREE_RATE) / regime_vol) if regime_vol > 1e-10 else 0.0
+        regime_mdd = _monte_carlo_max_drawdown(w, regime_ret_vec, regime_cov, seed=42)
+
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Stress test failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Stress test failed: {exc}")
+
+    return StressTestResponse(
+        baseline=StressMetrics(
+            expected_return=round(base_ret, 6),
+            volatility=round(base_vol, 6),
+            sharpe_ratio=round(base_sh, 4),
+            max_drawdown=round(base_mdd, 6),
+        ),
+        regime=StressMetrics(
+            expected_return=round(regime_ret, 6),
+            volatility=round(regime_vol, 6),
+            sharpe_ratio=round(regime_sh, 4),
+            max_drawdown=round(regime_mdd, 6),
+        ),
+        description=REGIME_2026["description"],
     )
 
 
