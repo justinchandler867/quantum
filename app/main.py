@@ -22,6 +22,7 @@ from app.config import (
     DEFAULT_LAMBDA,
     REFERENCE_HEDGES,
     RISK_FREE_RATE,
+    BETA_BENCHMARK,
 )
 from app.models import (
     CorrelationRequest,
@@ -136,7 +137,7 @@ def _ensure_data(tickers: list[str]) -> None:
     Caches in memory for the process lifetime.
     Reloads if new tickers are requested that aren't in the current dataset.
     """
-    all_needed = set(tickers + REFERENCE_HEDGES)
+    all_needed = set(tickers + REFERENCE_HEDGES + [BETA_BENCHMARK])
 
     if _store["returns"] is not None:
         have = set(_store["returns"].columns)
@@ -766,7 +767,11 @@ def _get_expected_returns_and_betas(
     Compute annualized expected returns and betas from historical data.
     """
     available = [t for t in tickers if t in returns_df.columns]
-    stats = compute_return_stats(returns_df[available])
+    # Include the beta benchmark in the subset so compute_return_stats can
+    # measure beta against it (it survives the per-request column subsetting).
+    cols = available + ([BETA_BENCHMARK] if BETA_BENCHMARK in returns_df.columns
+                        and BETA_BENCHMARK not in available else [])
+    stats = compute_return_stats(returns_df[cols], benchmark=BETA_BENCHMARK)
 
     exp_ret = np.array([stats.loc[t, "ann_return"] if t in stats.index else 0.0 for t in tickers])
     betas = np.array([stats.loc[t, "beta"] if t in stats.index else 1.0 for t in tickers])
@@ -883,6 +888,7 @@ async def optimize(req: OptimizeRequest):
         solver_message=result.solver_message,
         iterations=result.iterations,
         constraints_active=result.constraints_active,
+        constraints_note=result.constraints_note,
         comparison=comparison,
         apply_outlook=req.apply_outlook,
     )

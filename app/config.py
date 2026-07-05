@@ -36,6 +36,12 @@ PORTFOLIO_SIZE_HARD_FLOOR = 8
 # Included in correlation matrix as reference rows, not investable
 REFERENCE_HEDGES = ["TLT", "GLD", "SHY", "UUP", "VXX"]
 
+# ── Beta benchmark ──────────────────────────────────────────────────────────
+# The market proxy every beta is measured against. Always fetched alongside
+# requested tickers so it survives per-request column subsetting; passed
+# explicitly into the beta routines (never inferred from column order).
+BETA_BENCHMARK = "SPY"
+
 # ── Redis ────────────────────────────────────────────────────────────────────
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CACHE_TTL_DAILY = 60 * 60 * 18     # 18 hours (covers market close → next refresh)

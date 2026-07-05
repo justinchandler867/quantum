@@ -49,6 +49,34 @@ class OptimizationResult:
     solver_message: str
     iterations: int
     constraints_active: list[str]         # which constraints were binding
+    constraints_note: str | None = None   # honest note when profile caps were relaxed/degenerate
+
+
+def _project_to_bounds(w: np.ndarray, hi: float) -> np.ndarray:
+    """
+    Project a weight vector onto {w >= 0, sum(w) == 1, w <= hi} by iterative
+    water-filling: clip to the cap, then redistribute the excess mass across
+    the still-uncapped assets. Guarantees the returned weights never exceed
+    the per-asset cap (as long as n * hi >= 1, which the caller ensures).
+    """
+    n = len(w)
+    w = np.clip(np.asarray(w, dtype=float), 0.0, None)
+    if w.sum() <= 0:
+        w = np.ones(n)
+    w = w / w.sum()
+    for _ in range(100):
+        over = w > hi + 1e-12
+        if not over.any():
+            break
+        excess = (w[over] - hi).sum()
+        w[over] = hi
+        free = ~over & (w > 0)
+        if not free.any():
+            # everything is capped; distribute excess evenly to respect the cap
+            w = np.minimum(w + excess / n, hi)
+            break
+        w[free] += excess * (w[free] / w[free].sum())
+    return w
 
 
 def _portfolio_return(weights: np.ndarray, expected_returns: np.ndarray) -> float:
@@ -176,13 +204,30 @@ def optimize_portfolio(
     assert cov_matrix.shape == (n, n), f"Cov matrix shape mismatch: {cov_matrix.shape} vs ({n},{n})"
     assert betas.shape == (n,), f"Betas shape mismatch: {betas.shape} vs ({n},)"
 
+    # ── Feasibility guard (BUG 3a) ───────────────────────────────────────────
+    # If the per-asset cap can't sum to 1 across the eligible assets
+    # (n_eligible * max_position < 1), the sum-to-1 constraint is infeasible.
+    # Relax the *effective* cap honestly rather than 422-ing or (worse)
+    # returning normalized equal weights that silently exceed the cap.
+    constraints_note = None
+    n_eligible = len([t for t in tickers if t not in constraints.excluded_tickers])
+    effective_max_pos = constraints.max_position_pct
+    if n_eligible > 0 and n_eligible * effective_max_pos < 1.0:
+        relaxed = round((1.0 / n_eligible) * 1.25, 4)
+        constraints_note = (
+            f"position cap relaxed from {effective_max_pos:.2f} to {relaxed:.2f} "
+            f"(basket too small for profile cap)"
+        )
+        logger.warning(constraints_note)
+        effective_max_pos = relaxed
+
     # ── Bounds: per-asset min/max weights ────────────────────────────────────
     bounds = []
     for t in tickers:
         if t in constraints.excluded_tickers:
             bounds.append((0.0, 0.0))  # force to zero
         else:
-            bounds.append((constraints.min_position_pct, constraints.max_position_pct))
+            bounds.append((constraints.min_position_pct, effective_max_pos))
 
     # ── Constraints ──────────────────────────────────────────────────────────
     scipy_constraints = []
@@ -214,7 +259,7 @@ def optimize_portfolio(
     eligible = [i for i, t in enumerate(tickers) if t not in constraints.excluded_tickers]
     x0 = np.zeros(n)
     if eligible:
-        w_each = min(1.0 / len(eligible), constraints.max_position_pct)
+        w_each = min(1.0 / len(eligible), effective_max_pos)
         for i in eligible:
             x0[i] = w_each
         # Normalize to sum to 1
@@ -236,7 +281,8 @@ def optimize_portfolio(
     if not result.success:
         logger.warning(f"Optimizer did not converge: {result.message}. Using best found solution.")
 
-    w_opt = result.x
+    solver_message = result.message
+    w_opt = result.x.copy()
 
     # Clean up: zero out negligible weights, re-normalize
     w_opt[w_opt < 0.005] = 0.0
@@ -245,8 +291,27 @@ def optimize_portfolio(
         w_opt = w_opt / w_sum
     else:
         # Fallback to equal weight if optimizer failed completely
-        w_opt = x0
+        w_opt = x0.copy()
         logger.error("Optimizer produced all-zero weights, falling back to equal weight")
+
+    # (BUG 3b) Never return weights that violate their own upper bound.
+    # Re-normalization above (or an x0 fallback) can push a weight past the cap;
+    # project back into bounds. Applied unconditionally so the guarantee holds
+    # regardless of solver success.
+    if np.any(w_opt > effective_max_pos + 1e-6):
+        if not result.success:
+            logger.warning("Solver failed and weights exceeded cap — projecting into bounds")
+        w_opt = _project_to_bounds(w_opt, effective_max_pos)
+
+    # (BUG 3c) Single-point feasible region: when n_eligible * cap == 1 exactly,
+    # every asset is forced to the cap — there is nothing to optimize. Say so
+    # honestly instead of reporting a normal solve on a degenerate point.
+    if (np.allclose(w_opt, x0, atol=1e-6)
+            and abs(n_eligible * effective_max_pos - 1.0) < 1e-6):
+        solver_message = (
+            "constraints fully determine weights — no optimization possible "
+            "at this risk profile with this few holdings"
+        )
 
     # ── Compute portfolio metrics ────────────────────────────────────────────
     port_ret = _portfolio_return(w_opt, expected_returns)
@@ -270,9 +335,9 @@ def optimize_portfolio(
     if constraints.max_volatility and abs(port_vol - constraints.max_volatility) < 0.005:
         active_constraints.append(f"vol_cap ({constraints.max_volatility:.1%})")
 
-    at_max = [tickers[i] for i in range(n) if abs(w_opt[i] - constraints.max_position_pct) < 0.005]
+    at_max = [tickers[i] for i in range(n) if abs(w_opt[i] - effective_max_pos) < 0.005]
     if at_max:
-        active_constraints.append(f"max_position ({constraints.max_position_pct:.0%}): {', '.join(at_max)}")
+        active_constraints.append(f"max_position ({effective_max_pos:.0%}): {', '.join(at_max)}")
 
     at_min = [tickers[i] for i in range(n)
               if 0 < w_opt[i] < constraints.min_position_pct + 0.005 and w_opt[i] > 0.005]
@@ -302,9 +367,10 @@ def optimize_portfolio(
         cvar_95=round(cvar_95, 6),
         risk_contributions=risk_contribs,
         solver_success=result.success,
-        solver_message=result.message,
+        solver_message=solver_message,
         iterations=result.nit,
         constraints_active=active_constraints,
+        constraints_note=constraints_note,
     )
 
 

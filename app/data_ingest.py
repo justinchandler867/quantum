@@ -16,6 +16,7 @@ from app.config import (
     STRESS_DRAWDOWN_THRESHOLD,
     MIN_STRESS_DAYS,
     REFERENCE_HEDGES,
+    BETA_BENCHMARK,
 )
 
 logger = logging.getLogger(__name__)
@@ -177,19 +178,37 @@ def annualized_volatility(returns: pd.DataFrame) -> pd.Series:
     return returns.std() * np.sqrt(252)
 
 
-def compute_return_stats(returns: pd.DataFrame) -> pd.DataFrame:
+def compute_return_stats(
+    returns: pd.DataFrame, benchmark: str = BETA_BENCHMARK
+) -> pd.DataFrame:
     """
     Compute summary statistics per ticker for screening.
     Returns DataFrame with columns: ann_return, ann_vol, sharpe, beta, max_dd
+
+    Beta is measured against `benchmark` (default SPY), which must be a column
+    in `returns`. A ticker that *is* the benchmark gets beta ~1.0 legitimately
+    (cov/var of the series with itself). If the benchmark column is missing,
+    betas default to 1.0 with a warning — the benchmark must never be silently
+    inferred from column order (that produced self-benchmarked betas).
     """
     ann_ret = returns.mean() * 252
     ann_vol = returns.std() * np.sqrt(252)
     sharpe = ann_ret / ann_vol.replace(0, np.nan)
 
-    # Beta vs QQQ (or first ticker as proxy)
-    bench = "QQQ" if "QQQ" in returns.columns else returns.columns[0]
-    bench_var = returns[bench].var()
-    beta = returns.apply(lambda col: col.cov(returns[bench]) / bench_var if bench_var > 0 else 1.0)
+    # Beta vs the explicit market benchmark.
+    if benchmark in returns.columns:
+        bench_ret = returns[benchmark]
+        bench_var = bench_ret.var()
+        if bench_var > 0:
+            beta = returns.apply(lambda col: col.cov(bench_ret) / bench_var)
+        else:
+            beta = pd.Series(1.0, index=returns.columns)
+    else:
+        logger.warning(
+            f"Beta benchmark '{benchmark}' not in returns columns "
+            f"{list(returns.columns)}; defaulting betas to 1.0"
+        )
+        beta = pd.Series(1.0, index=returns.columns)
 
     # Max drawdown per ticker
     cum = (1 + returns).cumprod()

@@ -29,6 +29,7 @@ from app.config import (
     SCREEN_STAGE2_SIZE,
     SCREEN_FINAL_SIZE,
     RISK_FREE_RATE,
+    BETA_BENCHMARK,
 )
 
 logger = logging.getLogger(__name__)
@@ -314,6 +315,7 @@ def apply_hard_gates(fundamentals: pd.DataFrame) -> pd.DataFrame:
 def compute_factor_scores(
     fundamentals: pd.DataFrame,
     returns: pd.DataFrame,
+    benchmark: str = BETA_BENCHMARK,
 ) -> pd.DataFrame:
     """
     Stage 2: Compute factor z-scores for each ticker.
@@ -359,12 +361,22 @@ def compute_factor_scores(
     ann_ret = trailing.mean() * 252
     sharpe = ann_ret / ann_vol.replace(0, np.nan)
 
-    # Beta vs QQQ
-    bench = "QQQ" if "QQQ" in ret.columns else ret.columns[0]
-    bench_var = trailing[bench].var()
-    beta = trailing.apply(
-        lambda col: col.cov(trailing[bench]) / bench_var if bench_var > 0 else 1.0
-    )
+    # Beta vs the explicit market benchmark, taken from the FULL returns frame
+    # so it survives the per-request column subset above. Never inferred from
+    # column order (that made the first ticker its own benchmark -> beta 1.0).
+    if benchmark in returns.columns:
+        bench_trailing = returns[benchmark].iloc[-252:] if len(returns) > 252 else returns[benchmark]
+        bench_trailing = bench_trailing.reindex(trailing.index)
+        bench_var = bench_trailing.var()
+        if bench_var > 0:
+            beta = trailing.apply(lambda col: col.cov(bench_trailing) / bench_var)
+        else:
+            beta = pd.Series(1.0, index=trailing.columns)
+    else:
+        logger.warning(
+            f"Beta benchmark '{benchmark}' not in returns; defaulting betas to 1.0"
+        )
+        beta = pd.Series(1.0, index=trailing.columns)
 
     # Max drawdown
     cum = (1 + trailing).cumprod()

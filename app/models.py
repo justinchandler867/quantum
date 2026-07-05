@@ -112,6 +112,7 @@ class OptimizeResponse(BaseModel):
     solver_message: str
     iterations: int
     constraints_active: list[str]
+    constraints_note: str | None = None  # honest note when profile caps were relaxed/degenerate
     comparison: dict | None = None     # before/after if current weights provided
     apply_outlook: bool = False        # whether 2026 Co-CIO Outlook tilts were applied
 
