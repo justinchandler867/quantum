@@ -326,6 +326,12 @@ def compute_factor_scores(
       - Yield: dividend yield
     """
     tickers = [t for t in fundamentals["ticker"].values if t in returns.columns]
+    dropped_no_returns = [t for t in fundamentals["ticker"].values if t not in returns.columns]
+    if dropped_no_returns:
+        logger.warning(
+            f"Factor scoring dropped {len(dropped_no_returns)} ticker(s) with no "
+            f"return columns (not in loaded price data): {dropped_no_returns}"
+        )
     if not tickers:
         raise ValueError("No tickers have both fundamental and return data")
 

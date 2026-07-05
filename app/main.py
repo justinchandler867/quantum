@@ -1153,14 +1153,15 @@ async def screen_universe(req: ScreenRequest):
     if cached:
         return ScreenResponse(**cached)
 
-    # Ensure we have return data — use whatever tickers are already loaded,
-    # or load the screening universe
+    # Ensure the return data actually covers the requested tickers. Always
+    # call _ensure_data — its own missing-set logic (see _ensure_data) decides
+    # whether a fetch is needed, so this is a no-op when the store is already
+    # warm. Previously this only ran when the store was empty, which silently
+    # dropped any requested ticker that wasn't in a prior request's basket.
     loop = asyncio.get_running_loop()
-    if _store["returns"] is None:
-        # Need to load data first
-        from app.screener import load_nasdaq_tickers
-        tickers = req.tickers or load_nasdaq_tickers()
-        await loop.run_in_executor(None, _ensure_data, tickers)
+    from app.screener import load_nasdaq_tickers
+    tickers = req.tickers or load_nasdaq_tickers()
+    await loop.run_in_executor(None, _ensure_data, tickers)
 
     returns = _store["returns"]
 
