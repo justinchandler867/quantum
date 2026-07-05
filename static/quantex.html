@@ -757,7 +757,8 @@ function Discovery({profile,ports,onAdd}){
         ),
         e("div",{style:{marginBottom:10}},
           e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:4,letterSpacing:.3}},"How fit scores are calculated"),
-          e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.5}},"Each asset is scored against your profile on factor alignment (momentum, quality, value, low volatility, yield), risk band match, and horizon compatibility. Higher fit = better match for your specific profile.")
+          e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.5}},"Each asset is scored against your profile on factor alignment (momentum, quality, value, low volatility, yield), risk band match, and horizon compatibility. Higher fit = better match for your specific profile."),
+          e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.5,marginTop:6}},"Fit scores are relative to the screened universe — a score compares a name to its peers, not to an absolute standard.")
         ),
         e("div",null,
           e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:4,letterSpacing:.3}},"How to adjust"),

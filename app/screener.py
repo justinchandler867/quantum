@@ -468,6 +468,24 @@ def rank_by_composite(
 
 # ── Stage 3: Profile-Aware Fit Scoring ───────────────────────────────────────
 
+# ── Stage 3 fit-score budget (must sum to 100) ───────────────────────────────
+FIT_GOAL_PTS = 55       # goal alignment — cross-sectionally standardized composite
+FIT_BAND_PTS = 30       # symmetric risk-band around a risk-derived target beta
+FIT_HORIZON_PTS = 8     # vol vs investment horizon
+FIT_QUALITY_PTS = 7     # Sharpe-based quality floor (reduced, universal)
+FIT_BAND_FALLOFF = 0.85  # triangular half-width of the risk-band (in beta units)
+
+
+def _target_beta(risk_score: int) -> float:
+    """
+    The portfolio beta a risk profile is aiming for.
+      risk   0 -> 0.20   (very defensive)
+      risk  50 -> 0.85
+      risk 100 -> 1.50   (aggressive)
+    """
+    return 0.20 + (max(0, min(100, risk_score)) / 100.0) * 1.30
+
+
 def compute_fit_scores(
     candidates: pd.DataFrame,
     goal: str = "Balanced",
@@ -475,81 +493,73 @@ def compute_fit_scores(
     time_horizon_years: float = 7.0,
 ) -> pd.DataFrame:
     """
-    Stage 3: Score each candidate based on investor profile alignment.
+    Stage 3: Score each candidate on investor-profile alignment (0-100).
 
-    Fit Score (0-100) components:
-      40pts — Goal alignment (factor composite using goal-specific weights)
-      30pts — Risk band match (volatility and beta vs. profile tolerance)
-      15pts — Horizon match (higher-vol assets penalized for short horizons)
-      10pts — Quality floor (Sharpe ratio threshold)
-       5pts — Diversification bonus (low correlation with typical Nasdaq portfolio)
+    Budget (sums to 100):
+      55pts — Goal alignment. The goal-weighted z-composite is standardized
+              cross-sectionally (within this candidate set) and mapped to
+              [0, 55]. Standardizing removes the old ±2z saturation that
+              compressed the goal signal into ~19 of 40 points; the cost is
+              that a score is RELATIVE TO THE SCREENED UNIVERSE, not absolute.
+      30pts — Symmetric risk-band. Each risk_score maps to a target beta
+              (_target_beta) and the band scores distance to that target in
+              BOTH directions via a triangular falloff. So high-beta names are
+              rewarded at high risk scores and low-beta names at low risk
+              scores — fixing the old asymmetric band that only penalized.
+       8pts — Horizon match (high-vol assets need longer horizons).
+       7pts — Quality floor (Sharpe threshold), reduced so it can't outvote
+              the goal component.
+       0pts — (The old unconditional low-beta "diversification bonus" is
+              removed; its intent is subsumed by the symmetric risk-band.)
+
+    Note on |beta| banding: the risk-band compares |beta| to the target. This
+    treats a negative-beta hedge (e.g. beta -0.3) as a low-beta asset (0.3),
+    which is the intended behavior for defensive/income profiles — but it means
+    a strongly negative beta is scored by magnitude, not signedness. Acceptable
+    here because screened equities are overwhelmingly positive-beta; revisit if
+    inverse/short instruments enter the universe.
     """
     candidates = candidates.copy()
+    n = len(candidates)
 
-    # Risk band from risk_score
-    # Higher risk_score → tolerates higher vol and beta
-    max_vol_tolerance = 0.15 + (risk_score / 100) * 0.45    # 15% to 60%
-    max_beta_tolerance = 0.5 + (risk_score / 100) * 1.5     # 0.5 to 2.0
+    goal_weights = FACTOR_WEIGHTS_BY_GOAL.get(goal, FACTOR_WEIGHTS_DEFAULT)
 
-    fit_scores = []
-    for _, row in candidates.iterrows():
-        score = 0
+    # ── Goal alignment (55 pts), cross-sectionally standardized ──────────────
+    composite = (
+        goal_weights.get("momentum", 0) * candidates.get("z_momentum", 0) +
+        goal_weights.get("quality", 0) * candidates.get("z_quality", 0) +
+        goal_weights.get("value", 0) * candidates.get("z_value", 0) +
+        goal_weights.get("low_vol", 0) * candidates.get("z_low_vol", 0) +
+        goal_weights.get("yield", 0) * candidates.get("z_yield", 0)
+    )
+    comp_std = float(composite.std(ddof=0))
+    if comp_std > 1e-9:
+        comp_z = (composite - composite.mean()) / comp_std
+    else:
+        comp_z = composite * 0.0  # degenerate: everyone at the midpoint
+    goal_pts = ((comp_z + 2) / 4 * FIT_GOAL_PTS).clip(0, FIT_GOAL_PTS)
 
-        # ── Goal alignment (40 pts) ─────────────────────────────────────────
-        # Use the goal-specific factor weights to compute an aligned composite
-        goal_weights = FACTOR_WEIGHTS_BY_GOAL.get(goal, FACTOR_WEIGHTS_DEFAULT)
-        goal_composite = (
-            goal_weights.get("momentum", 0) * row.get("z_momentum", 0) +
-            goal_weights.get("quality", 0) * row.get("z_quality", 0) +
-            goal_weights.get("value", 0) * row.get("z_value", 0) +
-            goal_weights.get("low_vol", 0) * row.get("z_low_vol", 0) +
-            goal_weights.get("yield", 0) * row.get("z_yield", 0)
-        )
-        # Map z-score composite to 0-40 range (z of +2 = 40, z of -2 = 0)
-        score += max(0, min(40, (goal_composite + 2) * 10))
+    # ── Symmetric risk-band (30 pts) ─────────────────────────────────────────
+    target = _target_beta(risk_score)
+    abs_beta = candidates.get("beta", pd.Series(1.0, index=candidates.index)).abs()
+    band_pts = (FIT_BAND_PTS * (1 - (abs_beta - target).abs() / FIT_BAND_FALLOFF)).clip(lower=0)
 
-        # ── Risk band match (30 pts) ────────────────────────────────────────
-        vol = abs(row.get("volatility", 0.20))
-        beta = abs(row.get("beta", 1.0))
+    # ── Horizon match (8 pts) ────────────────────────────────────────────────
+    vol = candidates.get("volatility", pd.Series(0.20, index=candidates.index)).abs()
+    min_horizon = 1 + vol * 15
+    horizon_pts = pd.Series(FIT_HORIZON_PTS * 0.15, index=candidates.index)
+    horizon_pts[time_horizon_years >= min_horizon * 0.6] = FIT_HORIZON_PTS * 0.55
+    horizon_pts[time_horizon_years >= min_horizon] = FIT_HORIZON_PTS
 
-        if vol <= max_vol_tolerance and beta <= max_beta_tolerance:
-            score += 30
-        elif vol <= max_vol_tolerance * 1.3 and beta <= max_beta_tolerance * 1.3:
-            score += 15
-        else:
-            score += 5  # partial credit — asset exists on the spectrum
+    # ── Quality floor (7 pts) ────────────────────────────────────────────────
+    sh = candidates.get("sharpe", pd.Series(0.0, index=candidates.index))
+    quality_pts = pd.Series(0.0, index=candidates.index)
+    quality_pts[sh >= 0.2] = FIT_QUALITY_PTS * 0.3
+    quality_pts[sh >= 0.5] = FIT_QUALITY_PTS * 0.6
+    quality_pts[sh >= 1.0] = FIT_QUALITY_PTS
 
-        # ── Horizon match (15 pts) ──────────────────────────────────────────
-        # High-vol assets need longer horizons to smooth out
-        min_horizon_for_asset = 1 + vol * 15  # vol of 0.40 → needs ~7 year horizon
-        if time_horizon_years >= min_horizon_for_asset:
-            score += 15
-        elif time_horizon_years >= min_horizon_for_asset * 0.6:
-            score += 8
-        else:
-            score += 2
-
-        # ── Quality floor (10 pts) ──────────────────────────────────────────
-        sh = row.get("sharpe", 0)
-        if sh >= 1.0:
-            score += 10
-        elif sh >= 0.5:
-            score += 6
-        elif sh >= 0.2:
-            score += 3
-
-        # ── Diversification bonus (5 pts) ───────────────────────────────────
-        # Lower beta assets get a small bonus as they provide diversification
-        if beta < 0.5:
-            score += 5
-        elif beta < 0.8:
-            score += 3
-        elif beta < 1.0:
-            score += 1
-
-        fit_scores.append(min(100, round(score)))
-
-    candidates["fit_score"] = fit_scores
+    total = (goal_pts + band_pts + horizon_pts + quality_pts).clip(upper=100)
+    candidates["fit_score"] = total.round().astype(int)
 
     # Re-rank by fit score
     candidates = candidates.sort_values("fit_score", ascending=False)

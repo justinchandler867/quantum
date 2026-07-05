@@ -71,10 +71,12 @@ FACTOR_WEIGHTS_DEFAULT = {
 
 # Stage 3: Profile goal → factor weight overrides
 FACTOR_WEIGHTS_BY_GOAL = {
-    "Growth": {"momentum": 0.35, "quality": 0.25, "value": 0.15, "low_vol": 0.10, "yield": 0.15},
-    "Income": {"momentum": 0.10, "quality": 0.20, "value": 0.15, "low_vol": 0.20, "yield": 0.35},
-    "Preservation": {"momentum": 0.10, "quality": 0.25, "value": 0.15, "low_vol": 0.35, "yield": 0.15},
-    "Balanced": {"momentum": 0.20, "quality": 0.25, "value": 0.20, "low_vol": 0.20, "yield": 0.15},
+    # Redesigned so each goal has a distinct dominant factor (see compute_fit_scores):
+    # Growth is momentum-dominant, Income is low-vol/yield-dominant, Balanced is even.
+    "Growth": {"momentum": 0.50, "quality": 0.20, "value": 0.20, "low_vol": 0.05, "yield": 0.05},
+    "Income": {"momentum": 0.00, "quality": 0.20, "value": 0.10, "low_vol": 0.30, "yield": 0.40},
+    "Preservation": {"momentum": 0.00, "quality": 0.20, "value": 0.10, "low_vol": 0.45, "yield": 0.25},
+    "Balanced": {"momentum": 0.20, "quality": 0.20, "value": 0.20, "low_vol": 0.20, "yield": 0.20},
 }
 
 # Shortlist sizes
