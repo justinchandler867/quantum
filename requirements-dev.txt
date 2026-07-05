@@ -1,0 +1,5 @@
+# Development / test dependencies.
+# To run the test suite:
+#   pip install -r requirements-dev.txt
+#   pytest
+pytest>=9,<10
