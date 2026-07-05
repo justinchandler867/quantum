@@ -33,6 +33,31 @@ from app.config import (
 
 logger = logging.getLogger(__name__)
 
+# Winsorization ceiling for dividend yield (percentage points). Real-world
+# yields above this are almost always bad data (e.g. a stale price or a
+# special-distribution artifact), so we cap — but never silently.
+DIVIDEND_YIELD_CEILING = 25.0
+
+
+def normalize_dividend_yield(raw, ticker: str = "") -> float:
+    """
+    Normalize a raw yfinance ``dividendYield`` into a stored percentage.
+
+    The current yfinance contract returns ``dividendYield`` as a percent
+    number already (e.g. 2.04 == 2.04%, 0.35 == 0.35%), so it is used
+    directly — no decimal-vs-percent heuristic. Values above
+    ``DIVIDEND_YIELD_CEILING`` are winsorized, and every clamp emits a
+    warning so the ceiling can never trip silently.
+    """
+    dy = raw or 0.0
+    if dy > DIVIDEND_YIELD_CEILING:
+        logger.warning(
+            f"dividend_yield for {ticker or '?'} = {dy} exceeds ceiling "
+            f"{DIVIDEND_YIELD_CEILING}; winsorizing to {DIVIDEND_YIELD_CEILING}"
+        )
+        dy = DIVIDEND_YIELD_CEILING
+    return round(float(dy), 2)
+
 
 # ── Data Classes ─────────────────────────────────────────────────────────────
 
@@ -243,7 +268,7 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
                     "market_cap": info.get("marketCap", 0) or 0,
                     "price": info.get("regularMarketPrice", 0) or 0,
                     "avg_volume": info.get("averageVolume", 0) or 0,
-                    "dividend_yield": min(round(((info.get("dividendYield") or 0) * 100 if (info.get("dividendYield") or 0) < 1 else (info.get("dividendYield") or 0)), 2), 25),
+                    "dividend_yield": normalize_dividend_yield(info.get("dividendYield"), ticker_str),
                     "pe_ratio": info.get("trailingPE"),
                     "forward_pe": info.get("forwardPE"),
                     "pb_ratio": info.get("priceToBook"),
