@@ -662,6 +662,7 @@ function Discovery({profile,ports,onAdd}){
   const[addingTicker,setAddingTicker]=useState(null);
   const[addError,setAddError]=useState(null);
   const[howOpen,setHowOpen]=useState(false);
+  const[signalInfo,setSignalInfo]=useState(false);
   const searchRef=useRef(null);
   const skipNextSearch=useRef(false);
 
@@ -796,7 +797,11 @@ function Discovery({profile,ports,onAdd}){
           TH("ret","1Y RET"),TH("vol","VOL"),TH("beta","BETA"),TH("sh","SHARPE"),TH("yld","YIELD"),
           TH("pe","P/E"),e("th",null,"NEXT EARNINGS"),
           e("th",null,"DIV GROWTH"),TH("debtEq","DEBT/EQ"),TH("revGrowth","REV GROWTH"),
-          e("th",null,"RSI"),e("th",null,"SIGNAL"),e("th",null,"ADD TO")
+          e("th",null,"RSI"),
+          e("th",null,e("span",{style:{display:"inline-flex",alignItems:"center",gap:4}},"SIGNAL",
+            e("span",{onClick:(ev)=>{ev.stopPropagation();setSignalInfo(true);},title:"What does this signal measure?",style:{cursor:"pointer",fontSize:11,color:"#818cf8",fontWeight:"normal"}},"ⓘ")
+          )),
+          e("th",null,"ADD TO")
         )),
         e("tbody",null,rows.map(a=>{
           const fitCls=a.fit>=70?"fit-high":a.fit>=45?"fit-mid":"fit-low";
@@ -834,7 +839,14 @@ function Discovery({profile,ports,onAdd}){
         }))
       )
     ),
-    openTicker&&e(TickerChart,{ticker:openTicker,name:(ASSETS.find(x=>x.id===openTicker)||{}).n,onClose:()=>setOpenTicker(null)})
+    openTicker&&e(TickerChart,{ticker:openTicker,name:(ASSETS.find(x=>x.id===openTicker)||{}).n,onClose:()=>setOpenTicker(null)}),
+    signalInfo&&e("div",{onClick:()=>setSignalInfo(false),style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:1200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+      e("div",{onClick:(ev)=>ev.stopPropagation(),style:{background:"#0c1220",border:"1px solid rgba(99,102,241,.25)",borderRadius:12,padding:"20px 22px",maxWidth:440,position:"relative",boxShadow:"0 20px 60px rgba(0,0,0,.5)"}},
+        e("button",{onClick:()=>setSignalInfo(false),title:"Close",style:{position:"absolute",top:8,right:10,background:"none",border:"none",color:"#94a3b8",fontSize:18,cursor:"pointer",padding:"2px 8px",lineHeight:1}},"✕"),
+        e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:10,letterSpacing:.5}},"WHAT THE SIGNAL MEASURES"),
+        e("div",{style:{fontSize:13,color:"#cbd5e1",lineHeight:1.6}},"This signal comes from fundamental factor scoring (momentum, quality, value, volatility, yield) matched to your profile. It measures long-term attractiveness. The Indicator Consensus inside each ticker's chart measures short-term technical conditions. They can disagree — a stock can be fundamentally attractive while technically weak, or vice versa. Disagreement is information, not an error.")
+      )
+    )
   );
 }
 
@@ -1237,11 +1249,12 @@ function TickerChart({ticker,name,onClose}){
         e("text",{x:cx(i),y:chartH-pad+15,textAnchor:"middle",fontSize:9,fill:"#475569"},formatDateTick(data.dates[i],range))
       )),
       e("g",{onClick:()=>setShowConsensus(true),style:{cursor:"pointer"}},
-        e("rect",{x:pad-4,y:8,width:activeFamilyCount>0?200:300,height:activeFamilyCount>0?64:26,fill:"rgba(11,15,30,.82)",rx:6,stroke:"rgba(99,102,241,.2)",strokeWidth:".5"}),
+        e("rect",{x:pad-4,y:8,width:activeFamilyCount>0?320:300,height:activeFamilyCount>0?80:26,fill:"rgba(11,15,30,.82)",rx:6,stroke:"rgba(99,102,241,.2)",strokeWidth:".5"}),
         e("text",{x:pad+2,y:22,fontSize:9,fill:"#64748b"},activeFamilyCount>0?"INDICATOR CONSENSUS":"INDICATOR CONSENSUS · Turn on indicators"),
         activeFamilyCount>0&&e("text",{x:pad+2,y:42,fontSize:18,fill:consensus.color,fontWeight:"bold"},consensus.label.toUpperCase()),
         activeFamilyCount>0&&e("text",{x:pad+2,y:54,fontSize:9,fill:"#64748b"},"Based on "+activeFamilyCount+" indicator famil"+(activeFamilyCount===1?"y":"ies")),
-        activeFamilyCount>0&&e("text",{x:pad+2,y:66,fontSize:8,fill:"#64748b",fontStyle:"italic"},"Not a trade recommendation")
+        activeFamilyCount>0&&e("text",{x:pad+2,y:66,fontSize:8,fill:"#64748b",fontStyle:"italic"},"Not a trade recommendation"),
+        activeFamilyCount>0&&e("text",{x:pad+2,y:78,fontSize:8,fill:"#475569",fontStyle:"italic"},"Technical view · may differ from Discovery's fundamental signal")
       )
     );
   }
