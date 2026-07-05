@@ -1194,6 +1194,7 @@ async def screen_universe(req: ScreenRequest):
         shortlist=[
             ScreenedAssetResponse(
                 ticker=a.ticker, name=a.name, sector=a.sector, industry=a.industry,
+                asset_type=a.asset_type,
                 market_cap=a.market_cap, price=a.price, avg_volume=a.avg_volume,
                 return_1y=a.return_1y, return_6m=a.return_6m, return_3m=a.return_3m,
                 volatility=a.volatility, sharpe=a.sharpe, beta=a.beta,

@@ -191,6 +191,7 @@ class ScreenedAssetResponse(BaseModel):
     name: str
     sector: str
     industry: str
+    asset_type: str = "Stock"    # "ETF" or "Stock"
     market_cap: float
     price: float
     avg_volume: float

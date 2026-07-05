@@ -69,6 +69,7 @@ class ScreenedAsset:
     name: str
     sector: str
     industry: str
+    asset_type: str          # "ETF" or "Stock"
     market_cap: float
     price: float
     avg_volume: float
@@ -266,9 +267,12 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
                     "name": info.get("shortName", info.get("longName", ticker_str)),
                     "sector": info.get("sector", "Unknown"),
                     "industry": info.get("industry", "Unknown"),
-                    "market_cap": info.get("marketCap", 0) or 0,
-                    # ETFs report marketCap as None; net assets is the size proxy.
+                    # ETFs report marketCap as None; use net assets (totalAssets)
+                    # as the size proxy so the stored value is never $0.
+                    "market_cap": (info.get("marketCap") or info.get("totalAssets") or 0),
                     "total_assets": info.get("totalAssets", 0) or 0,
+                    # yfinance quoteType is "ETF" / "EQUITY" / "MUTUALFUND" / ...
+                    "asset_type": "ETF" if info.get("quoteType") == "ETF" else "Stock",
                     "price": info.get("regularMarketPrice", 0) or 0,
                     "avg_volume": info.get("averageVolume", 0) or 0,
                     "dividend_yield": normalize_dividend_yield(info.get("dividendYield"), ticker_str),
@@ -629,6 +633,7 @@ def run_screening_pipeline(
                     or row.get("sector") or "Unknown"),
             industry=(_SECTORS.get(row["ticker"], {}).get("industry")
                       or row.get("industry") or "Unknown"),
+            asset_type=row.get("asset_type", "Stock"),
             market_cap=row.get("market_cap", 0),
             price=row.get("price", 0),
             avg_volume=row.get("avg_volume", 0),

@@ -22,6 +22,7 @@ def _make_full_asset() -> ScreenedAsset:
         name="Apple Inc.",
         sector="Technology",
         industry="Consumer Electronics",
+        asset_type="Stock",
         market_cap=3.0e12,
         price=225.0,
         avg_volume=5.0e7,
@@ -71,7 +72,8 @@ def test_screened_asset_optionals_default_to_none_or_zero():
     """A minimal asset (no optional fields) must still construct — defaults hold."""
     minimal = ScreenedAsset(
         ticker="MSFT", name="Microsoft", sector="Technology",
-        industry="Software", market_cap=2.5e12, price=400.0, avg_volume=2.0e7,
+        industry="Software", asset_type="Stock", market_cap=2.5e12, price=400.0,
+        avg_volume=2.0e7,
         return_1y=0.2, return_6m=0.1, return_3m=0.05, volatility=0.25,
         sharpe=0.8, beta=1.0, max_drawdown=-0.15, dividend_yield=0.008,
         pe_ratio=30.0, forward_pe=27.0, pb_ratio=12.0, earnings_yield=0.033,
@@ -90,3 +92,4 @@ def test_screened_asset_has_no_unexpected_required_fields():
     _make_full_asset()  # would raise TypeError on a missing required field
     names = {f.name for f in fields(ScreenedAsset)}
     assert "earnings_date" in names
+    assert "asset_type" in names

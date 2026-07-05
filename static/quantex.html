@@ -353,7 +353,7 @@ function mapScreened(item) {
   let yld = item.dividend_yield || 0;
   if (yld > 25) yld = yld / 100;
   return {
-    id: item.ticker, n: item.name || item.ticker, t: item.sector || "Stock",
+    id: item.ticker, n: item.name || item.ticker, t: item.asset_type || item.sector || "Stock",
     sec: item.sector || "Unknown", ret: ret1y, vol: item.volatility || 20,
     beta: item.beta || 1, sh: sh, yld: yld,
     sig: sh >= 1.5 ? "Strong Buy" : sh >= 1 ? "Buy" : sh >= 0.5 ? "Hold" : "Sell",
