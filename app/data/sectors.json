@@ -194,11 +194,6 @@
   "industry": "Computer Hardware",
   "sub_industry": null
  },
- "ANSS": {
-  "sector": "Unknown",
-  "industry": null,
-  "sub_industry": null
- },
  "AON": {
   "sector": "Financial Services",
   "industry": "Insurance Brokers",
@@ -262,11 +257,6 @@
  "ATO": {
   "sector": "Utilities",
   "industry": "Utilities - Regulated Gas",
-  "sub_industry": null
- },
- "ATVI": {
-  "sector": "Unknown",
-  "industry": null,
   "sub_industry": null
  },
  "AVB": {
@@ -642,11 +632,6 @@
  "COST": {
   "sector": "Consumer Defensive",
   "industry": "Discount Stores",
-  "sub_industry": null
- },
- "COUP": {
-  "sector": "Unknown",
-  "industry": null,
   "sub_industry": null
  },
  "CPAY": {
@@ -1102,11 +1087,6 @@
  "FIS": {
   "sector": "Technology",
   "industry": "Information Technology Services",
-  "sub_industry": null
- },
- "FISV": {
-  "sector": "Unknown",
-  "industry": null,
   "sub_industry": null
  },
  "FITB": {
@@ -1904,11 +1884,6 @@
   "industry": "Aerospace & Defense",
   "sub_industry": null
  },
- "NOVA": {
-  "sector": "Unknown",
-  "industry": null,
-  "sub_industry": null
- },
  "NOW": {
   "sector": "Technology",
   "industry": "Software - Application",
@@ -2334,11 +2309,6 @@
   "industry": "Solar",
   "sub_industry": null
  },
- "SGEN": {
-  "sector": "Unknown",
-  "industry": null,
-  "sub_industry": null
- },
  "SHW": {
   "sector": "Basic Materials",
   "industry": "Specialty Chemicals",
@@ -2422,11 +2392,6 @@
  "SPGI": {
   "sector": "Financial Services",
   "industry": "Financial Data & Stock Exchanges",
-  "sub_industry": null
- },
- "SPLK": {
-  "sector": "Unknown",
-  "industry": null,
   "sub_industry": null
  },
  "SPY": {
@@ -2832,11 +2797,6 @@
  "WAT": {
   "sector": "Healthcare",
   "industry": "Diagnostics & Research",
-  "sub_industry": null
- },
- "WBA": {
-  "sector": "Unknown",
-  "industry": null,
   "sub_industry": null
  },
  "WBD": {
