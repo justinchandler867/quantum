@@ -858,6 +858,7 @@ async def optimize(req: OptimizeRequest):
             betas=betas,
             objective=obj,
             constraints=constraints,
+            apply_outlook=req.apply_outlook,
         )
 
     except ValueError as e:

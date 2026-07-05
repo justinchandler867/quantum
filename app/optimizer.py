@@ -180,6 +180,7 @@ def optimize_portfolio(
     objective: Objective = Objective.MAX_SHARPE,
     constraints: ProfileConstraints | None = None,
     rf: float = RISK_FREE_RATE,
+    apply_outlook: bool = False,
 ) -> OptimizationResult:
     """
     Run constrained portfolio optimization using scipy SLSQP.
@@ -304,14 +305,38 @@ def optimize_portfolio(
         w_opt = _project_to_bounds(w_opt, effective_max_pos)
 
     # (BUG 3c) Single-point feasible region: when n_eligible * cap == 1 exactly,
-    # every asset is forced to the cap — there is nothing to optimize. Say so
-    # honestly instead of reporting a normal solve on a degenerate point.
-    if (np.allclose(w_opt, x0, atol=1e-6)
-            and abs(n_eligible * effective_max_pos - 1.0) < 1e-6):
-        solver_message = (
-            "constraints fully determine weights — no optimization possible "
-            "at this risk profile with this few holdings"
-        )
+    # every asset is forced to the cap — there is nothing to optimize. Distinguish
+    # two sub-cases honestly: (i) the determined weights are feasible (just fully
+    # determined), vs (ii) they violate the beta cap, so the request is infeasible.
+    single_point = (
+        np.allclose(w_opt, x0, atol=1e-6)
+        and abs(n_eligible * effective_max_pos - 1.0) < 1e-6
+    )
+    if single_point:
+        determined_beta = float(w_opt @ betas)
+        if (constraints.max_beta is not None
+                and determined_beta > constraints.max_beta + 1e-6):
+            solver_message = (
+                f"determined weights violate the beta cap (infeasible) — position "
+                f"constraints force portfolio beta to {determined_beta:.2f}, above the "
+                f"{constraints.max_beta:.2f} cap for this risk profile"
+            )
+        else:
+            solver_message = (
+                "constraints fully determine weights — no optimization possible "
+                "at this risk profile with this few holdings"
+            )
+        # When an outlook tilt was applied, note that it could not do anything:
+        # a fully-determined geometry has no free weights for the tilt to move.
+        if apply_outlook:
+            _outlook_note = (
+                "outlook tilt could not alter weights: position constraints "
+                "fully determine this portfolio"
+            )
+            constraints_note = (
+                _outlook_note if constraints_note is None
+                else f"{constraints_note}; {_outlook_note}"
+            )
 
     # ── Compute portfolio metrics ────────────────────────────────────────────
     port_ret = _portfolio_return(w_opt, expected_returns)

@@ -267,6 +267,8 @@ def fetch_fundamentals(tickers: list[str]) -> pd.DataFrame:
                     "sector": info.get("sector", "Unknown"),
                     "industry": info.get("industry", "Unknown"),
                     "market_cap": info.get("marketCap", 0) or 0,
+                    # ETFs report marketCap as None; net assets is the size proxy.
+                    "total_assets": info.get("totalAssets", 0) or 0,
                     "price": info.get("regularMarketPrice", 0) or 0,
                     "avg_volume": info.get("averageVolume", 0) or 0,
                     "dividend_yield": normalize_dividend_yield(info.get("dividendYield"), ticker_str),
@@ -299,8 +301,16 @@ def apply_hard_gates(fundamentals: pd.DataFrame) -> pd.DataFrame:
     """
     before = len(fundamentals)
 
+    # ETFs report marketCap as None/0 from yfinance, so they could never clear
+    # the size gate. Fall back to net assets (totalAssets) so broad-market,
+    # bond, and commodity ETFs are eligible on the same $-size basis.
+    total_assets = fundamentals.get("total_assets", 0)
+    effective_cap = fundamentals["market_cap"].where(
+        fundamentals["market_cap"] > 0, total_assets
+    )
+
     passed = fundamentals[
-        (fundamentals["market_cap"] >= SCREEN_MIN_MARKET_CAP) &
+        (effective_cap >= SCREEN_MIN_MARKET_CAP) &
         (fundamentals["avg_volume"] >= SCREEN_MIN_AVG_VOLUME) &
         (fundamentals["price"] >= SCREEN_MIN_PRICE)
     ].copy()
