@@ -101,6 +101,9 @@ _store = {
     "normal_returns": None,
     "stress_returns": None,
     "stress_mask": None,
+    # Effective-size cache for Black-Litterman market weights: ticker -> float.
+    # Populated lazily by _get_market_caps (marketCap, ETF fallback totalAssets).
+    "fundamentals": {},
 }
 _store_lock = threading.Lock()
 
@@ -730,6 +733,8 @@ from app.optimizer import (
     generate_efficient_frontier,
 )
 from app.data_ingest import annualized_volatility as compute_ann_vol, compute_return_stats
+from app.return_models import ledoit_wolf_constant_correlation, black_litterman
+from app.config import PRICE_HISTORY_YEARS
 
 
 def _build_profile_constraints(
@@ -777,6 +782,120 @@ def _get_expected_returns_and_betas(
     betas = np.array([stats.loc[t, "beta"] if t in stats.index else 1.0 for t in tickers])
 
     return exp_ret, betas
+
+
+def _get_market_caps(tickers: list[str]) -> tuple[np.ndarray, str | None]:
+    """
+    Effective-size market caps for the Black-Litterman market weights.
+
+    Order of preference per ticker:
+      1. Stored fundamentals cache (_store["fundamentals"]) if loaded.
+      2. A live yfinance `info` fetch: marketCap, ETF fallback totalAssets.
+    A missing or zero cap is replaced by the basket-median positive cap, and
+    the ticker is named in the returned constraints note (honest fallback).
+
+    Returns (caps ndarray aligned to `tickers`, note-or-None).
+    """
+    import yfinance as yf
+
+    cache = _store.get("fundamentals") or {}
+    caps: dict[str, float] = {}
+    to_fetch = []
+    for t in tickers:
+        cached = cache.get(t)
+        if cached and cached > 0:
+            caps[t] = float(cached)
+        else:
+            to_fetch.append(t)
+
+    if to_fetch:
+        try:
+            tobj = yf.Tickers(" ".join(to_fetch))
+            for t in to_fetch:
+                eff = 0.0
+                try:
+                    obj = tobj.tickers.get(t)
+                    info = (obj.info if obj is not None else {}) or {}
+                    eff = float(info.get("marketCap") or info.get("totalAssets") or 0.0)
+                except Exception as exc:
+                    logger.debug(f"market cap fetch failed for {t}: {exc}")
+                caps[t] = eff
+                if eff > 0:
+                    cache[t] = eff
+        except Exception as exc:
+            logger.warning(f"batch market-cap fetch failed: {exc}")
+            for t in to_fetch:
+                caps.setdefault(t, 0.0)
+    _store["fundamentals"] = cache
+
+    positive = [caps[t] for t in tickers if caps.get(t, 0.0) > 0]
+    median_cap = float(np.median(positive)) if positive else 1.0
+
+    missing = [t for t in tickers if caps.get(t, 0.0) <= 0]
+    note = None
+    if missing:
+        for t in missing:
+            caps[t] = median_cap
+        note = (
+            f"market cap unavailable for {', '.join(missing)} — "
+            f"substituted basket-median size for equilibrium weights"
+        )
+
+    return np.array([caps[t] for t in tickers], dtype=float), note
+
+
+def _build_black_litterman_inputs(
+    returns, tickers: list[str], apply_outlook: bool, view_confidence: float,
+) -> dict:
+    """
+    Assemble the Black-Litterman (μ, Σ) for the optimizer.
+
+    Σ = Ledoit-Wolf constant-correlation shrinkage of the sample covariance over
+    the available return window (max 5 years, min 1 year), annualized.
+    μ = equilibrium prior π (apply_outlook off) or the BL posterior with the
+    Co-CIO Outlook sector tilts recast as views at `view_confidence`.
+
+    Betas remain historical (they gate the profile beta cap, not the returns).
+    Returns a dict with tickers, sigma, mu, betas, n_days, shrinkage_alpha, note.
+    """
+    from app.coc_io_outlook import SECTOR_TILTS_2026
+    from app.screener import _SECTORS
+
+    available = [t for t in tickers if t in returns.columns]
+    if len(available) < 2:
+        raise ValueError("Fewer than 2 requested tickers have return data for Black-Litterman")
+
+    window_df = returns[available].dropna().tail(PRICE_HISTORY_YEARS * 252)
+    if window_df.shape[0] < 60:
+        raise ValueError("Insufficient overlapping return history for Black-Litterman shrinkage")
+
+    sigma, alpha, n_days = ledoit_wolf_constant_correlation(window_df.values)
+
+    caps, caps_note = _get_market_caps(available)
+
+    # Sector tilts as views (zeros when the outlook is off -> posterior == π).
+    if apply_outlook:
+        tilts = np.array([
+            SECTOR_TILTS_2026.get((_SECTORS.get(t) or {}).get("sector"), 0.0)
+            for t in available
+        ])
+    else:
+        tilts = np.zeros(len(available))
+
+    mu = black_litterman(sigma, caps, tilts, view_confidence=view_confidence)
+
+    # Historical betas aligned to `available`.
+    _, betas = _get_expected_returns_and_betas(returns, available)
+
+    return {
+        "tickers": available,
+        "sigma": sigma,
+        "mu": mu,
+        "betas": betas,
+        "n_days": n_days,
+        "shrinkage_alpha": round(float(alpha), 6),
+        "note": caps_note,
+    }
 
 
 def _compute_current_portfolio_stats(
@@ -829,32 +948,56 @@ async def optimize(req: OptimizeRequest):
     # Compute λ for covariance blending
     lam = lambda_from_risk_score(req.risk_score) if req.risk_score is not None else DEFAULT_LAMBDA
 
+    # Black-Litterman metadata (populated only under return_model="black_litterman").
+    bl_n_days: int | None = None
+    bl_alpha: float | None = None
+    bl_caps_note: str | None = None
+
     try:
-        # Get blended covariance matrix
-        cov_result = build_covariance_matrix(
-            normal_returns, stress_returns, req.tickers,
-            lam=lam, window=req.window,
-        )
+        if req.return_model == "black_litterman":
+            # Shrunk covariance + market-implied equilibrium prior (Outlook = views).
+            bl = _build_black_litterman_inputs(
+                returns, req.tickers, req.apply_outlook, req.view_confidence,
+            )
+            used_tickers = bl["tickers"]
+            used_cov = bl["sigma"]
+            exp_ret = bl["mu"]
+            betas = bl["betas"]
+            bl_n_days = bl["n_days"]
+            bl_alpha = bl["shrinkage_alpha"]
+            bl_caps_note = bl["note"]
+            logger.info(
+                f"Black-Litterman: {len(used_tickers)} tickers, n_days={bl_n_days}, "
+                f"alpha={bl_alpha}, outlook={req.apply_outlook}, c={req.view_confidence}"
+            )
+        else:
+            # Historical (default) — byte-identical prior behavior.
+            cov_result = build_covariance_matrix(
+                normal_returns, stress_returns, req.tickers,
+                lam=lam, window=req.window,
+            )
+            used_tickers = cov_result.tickers
+            used_cov = cov_result.matrix
 
-        # Get expected returns and betas from historical data
-        exp_ret, betas = _get_expected_returns_and_betas(returns, cov_result.tickers)
+            # Get expected returns and betas from historical data
+            exp_ret, betas = _get_expected_returns_and_betas(returns, used_tickers)
 
-        # Apply 2026 Co-CIO Outlook sector tilts to expected returns if requested
-        if req.apply_outlook:
-            from app.coc_io_outlook import apply_outlook_tilts
-            from app.screener import _SECTORS
-            sectors_map = {t: (_SECTORS.get(t) or {}).get("sector") for t in cov_result.tickers}
-            exp_ret = apply_outlook_tilts(exp_ret, cov_result.tickers, sectors_map)
-            logger.info(f"Applied 2026 Co-CIO Outlook tilts to {len(cov_result.tickers)} tickers")
+            # Apply 2026 Co-CIO Outlook sector tilts to expected returns if requested
+            if req.apply_outlook:
+                from app.coc_io_outlook import apply_outlook_tilts
+                from app.screener import _SECTORS
+                sectors_map = {t: (_SECTORS.get(t) or {}).get("sector") for t in used_tickers}
+                exp_ret = apply_outlook_tilts(exp_ret, used_tickers, sectors_map)
+                logger.info(f"Applied 2026 Co-CIO Outlook tilts to {len(used_tickers)} tickers")
 
         # Map objective string to enum
         obj = Objective(req.objective)
 
         # Run optimizer
         result = optimize_portfolio(
-            tickers=cov_result.tickers,
+            tickers=used_tickers,
             expected_returns=exp_ret,
-            cov_matrix=cov_result.matrix,
+            cov_matrix=used_cov,
             betas=betas,
             objective=obj,
             constraints=constraints,
@@ -867,12 +1010,20 @@ async def optimize(req: OptimizeRequest):
         logger.error(f"Optimization failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Optimization failed: {e}")
 
+    # Fold the equilibrium-weight fallback note into the response note honestly.
+    constraints_note = result.constraints_note
+    if bl_caps_note:
+        constraints_note = (
+            bl_caps_note if constraints_note is None
+            else f"{constraints_note}; {bl_caps_note}"
+        )
+
     # Optional: compute comparison with current weights
     comparison = None
     if req.include_current_weights:
         comparison = _compute_current_portfolio_stats(
-            req.include_current_weights, cov_result.tickers,
-            exp_ret, cov_result.matrix, betas,
+            req.include_current_weights, used_tickers,
+            exp_ret, used_cov, betas,
         )
 
     return OptimizeResponse(
@@ -889,9 +1040,12 @@ async def optimize(req: OptimizeRequest):
         solver_message=result.solver_message,
         iterations=result.iterations,
         constraints_active=result.constraints_active,
-        constraints_note=result.constraints_note,
+        constraints_note=constraints_note,
         comparison=comparison,
         apply_outlook=req.apply_outlook,
+        return_model_used=req.return_model,
+        n_days=bl_n_days,
+        shrinkage_alpha=bl_alpha,
     )
 
 

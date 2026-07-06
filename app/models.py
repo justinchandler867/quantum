@@ -96,6 +96,20 @@ class OptimizeRequest(BaseModel):
     apply_outlook: bool = Field(
         False, description="Apply 2026 Co-CIO Outlook sector tilts to expected returns"
     )
+    return_model: str = Field(
+        "historical",
+        pattern="^(historical|black_litterman)$",
+        description=(
+            "Expected-return model. 'historical' (default) = sample covariance + "
+            "historical means (byte-identical prior behavior). 'black_litterman' = "
+            "Ledoit-Wolf shrunk covariance + market-implied equilibrium prior, with "
+            "Outlook tilts recast as views."
+        ),
+    )
+    view_confidence: float = Field(
+        1.0, gt=0.0, le=1000.0,
+        description="View conviction c (BL + apply_outlook only). Low/Med/High = 0.5/1.0/3.0.",
+    )
 
 
 class OptimizeResponse(BaseModel):
@@ -115,6 +129,9 @@ class OptimizeResponse(BaseModel):
     constraints_note: str | None = None  # honest note when profile caps were relaxed/degenerate
     comparison: dict | None = None     # before/after if current weights provided
     apply_outlook: bool = False        # whether 2026 Co-CIO Outlook tilts were applied
+    return_model_used: str = "historical"       # "historical" or "black_litterman"
+    n_days: int | None = None          # trading days behind the estimates (BL only)
+    shrinkage_alpha: float | None = None  # Ledoit-Wolf shrinkage intensity (BL only)
 
 
 class StressTestRequest(BaseModel):
