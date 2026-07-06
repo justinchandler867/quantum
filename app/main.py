@@ -895,42 +895,6 @@ async def optimize(req: OptimizeRequest):
     )
 
 
-def _monte_carlo_max_drawdown(
-    weights: np.ndarray,
-    annual_mean: np.ndarray,
-    annual_cov: np.ndarray,
-    n_paths: int = 1000,
-    days: int = 252,
-    seed: int = 42,
-) -> float:
-    """
-    Median max-drawdown across N simulated 1-year paths.
-
-    Daily returns drawn from multivariate normal with (mean/252, cov/252).
-    Portfolio log return per day = w · r; equity curve = exp(cumsum). Max
-    drawdown per path = min((equity - running_max)/running_max). The function
-    returns the median, which gives a typical-case rather than tail estimate.
-
-    Deterministic for a given seed so baseline and regime calls produce
-    apples-to-apples comparisons (the only difference between calls is the
-    distribution, not the random draws).
-    """
-    rng = np.random.default_rng(seed)
-    daily_mean = annual_mean / days
-    daily_cov = annual_cov / days
-    # Add a tiny ridge for numerical stability so multivariate_normal doesn't
-    # complain about non-PSD covariance from floating-point noise.
-    ridge = 1e-12 * np.eye(daily_cov.shape[0])
-    samples = rng.multivariate_normal(daily_mean, daily_cov + ridge, size=(n_paths, days))
-    port_daily = samples @ weights  # (n_paths, days)
-    equity = np.empty((n_paths, days + 1))
-    equity[:, 0] = 1.0
-    equity[:, 1:] = np.exp(np.cumsum(port_daily, axis=1))
-    run_max = np.maximum.accumulate(equity, axis=1)
-    drawdown = (equity - run_max) / run_max
-    return float(np.median(drawdown.min(axis=1)))
-
-
 @app.post("/api/stress_test_2026", response_model=StressTestResponse)
 async def stress_test_2026(req: StressTestRequest):
     """
@@ -957,7 +921,9 @@ async def stress_test_2026(req: StressTestRequest):
             raise HTTPException(status_code=422, detail="Weights must sum to a positive value")
         w = w / w.sum()
 
-        from app.coc_io_outlook import apply_regime, REGIME_2026
+        from app.coc_io_outlook import (
+            apply_regime, REGIME_2026, compute_attribution, monte_carlo_max_drawdown,
+        )
         from app.screener import _SECTORS
         sectors_map = {t: (_SECTORS.get(t) or {}).get("sector") for t in tickers}
 
@@ -965,14 +931,24 @@ async def stress_test_2026(req: StressTestRequest):
         base_ret = float(w @ exp_ret)
         base_vol = float(np.sqrt(max(w @ cov_result.matrix @ w, 0.0)))
         base_sh = ((base_ret - RISK_FREE_RATE) / base_vol) if base_vol > 1e-10 else 0.0
-        base_mdd = _monte_carlo_max_drawdown(w, exp_ret, cov_result.matrix, seed=42)
 
         # Regime-adjusted metrics
         regime_ret_vec, regime_cov = apply_regime(exp_ret, cov_result.matrix, tickers, sectors_map)
         regime_ret = float(w @ regime_ret_vec)
         regime_vol = float(np.sqrt(max(w @ regime_cov @ w, 0.0)))
         regime_sh = ((regime_ret - RISK_FREE_RATE) / regime_vol) if regime_vol > 1e-10 else 0.0
-        regime_mdd = _monte_carlo_max_drawdown(w, regime_ret_vec, regime_cov, seed=42)
+
+        # Max drawdown. When attribution is on, its waterfall computes the [none]
+        # and [T,V,C] endpoints — reuse them so components sum exactly to the
+        # reported Δ (shared seed). Otherwise run the two MC states directly.
+        attribution = None
+        if req.include_attribution:
+            attribution, base_mdd, regime_mdd = compute_attribution(
+                exp_ret, cov_result.matrix, w, tickers, sectors_map, RISK_FREE_RATE,
+            )
+        else:
+            base_mdd = monte_carlo_max_drawdown(w, exp_ret, cov_result.matrix, seed=42)
+            regime_mdd = monte_carlo_max_drawdown(w, regime_ret_vec, regime_cov, seed=42)
 
     except HTTPException:
         raise
@@ -996,6 +972,7 @@ async def stress_test_2026(req: StressTestRequest):
             max_drawdown=round(regime_mdd, 6),
         ),
         description=REGIME_2026["description"],
+        attribution=attribution,
     )
 
 

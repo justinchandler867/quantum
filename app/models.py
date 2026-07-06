@@ -121,6 +121,7 @@ class StressTestRequest(BaseModel):
     tickers: list[str] = Field(..., min_length=2, max_length=50)
     weights: dict[str, float] = Field(..., description="Current weights as ticker → pct (0-100)")
     window: int = Field(252, ge=60, le=1260)
+    include_attribution: bool = True
 
 
 class StressMetrics(BaseModel):
@@ -134,6 +135,7 @@ class StressTestResponse(BaseModel):
     baseline: StressMetrics
     regime: StressMetrics
     description: str
+    attribution: dict | None = None    # regime deterioration decomposed T/V/C
 
 
 class MultiOptimizeRequest(BaseModel):

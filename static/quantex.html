@@ -1610,6 +1610,41 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
                 e("td",{style:{padding:"6px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:"bold",color:better?"#1D9E75":"#ef4444"}},rv)
               )))
             ),
+            stressResult.attribution&&(()=>{
+              const a=stressResult.attribution;const G="#1D9E75",R="#ef4444";
+              const METRICS=[
+                {label:"Expected Return",dp:2,segs:[["Tilts",a.return.tilts]],good:1},
+                {label:"Volatility",dp:4,segs:[["Vol scaling",a.vol.vol_scaling],["Correlation",a.vol.correlation]],good:-1},
+                {label:"Sharpe Ratio",dp:4,segs:[["Tilts",a.sharpe.tilts],["Vol scaling",a.sharpe.vol_scaling],["Correlation",a.sharpe.correlation]],good:1},
+                {label:"Est. Max Drawdown",dp:4,segs:[["Tilts",a.mdd.tilts],["Vol scaling",a.mdd.vol_scaling],["Correlation",a.mdd.correlation]],good:1},
+              ];
+              const bar=(m)=>{const tot=m.segs.reduce((s,x)=>s+Math.abs(x[1]),0)||1;
+                return e("div",{style:{display:"flex",height:13,borderRadius:3,overflow:"hidden",background:"#0a0f1c"}},
+                  m.segs.filter(x=>Math.abs(x[1])>1e-9).map(x=>e("div",{key:x[0],title:x[0]+": "+x[1].toFixed(4),style:{width:(Math.abs(x[1])/tot*100)+"%",background:x[1]*m.good>0?G:R,opacity:.85}})));};
+              return e("div",{style:{marginBottom:10,padding:"10px 12px",background:"rgba(99,102,241,.04)",border:"1px solid rgba(99,102,241,.12)",borderRadius:8}},
+                e("div",{style:{fontSize:10,fontWeight:700,color:"#a5b4fc",letterSpacing:.5,marginBottom:8}},"WHY — REGIME ATTRIBUTION"),
+                e("div",{style:{fontSize:10,color:"#cbd5e1",lineHeight:1.5,marginBottom:10}},a.headline),
+                METRICS.map(m=>e("div",{key:m.label,style:{marginBottom:7}},
+                  e("div",{style:{display:"flex",justifyContent:"space-between",fontSize:9,color:"#94a3b8",marginBottom:2}},
+                    e("span",null,m.label),
+                    e("span",{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:8.5}},m.segs.map(x=>x[0][0]+" "+(x[1]>=0?"+":"")+x[1].toFixed(m.dp)).join("  "))
+                  ),bar(m))),
+                e("div",{style:{fontSize:8.5,color:"#475569",fontStyle:"italic",marginTop:2,marginBottom:8}},"Drawdown attribution applies changes in order: tilts, vol, correlation."),
+                e("div",{style:{fontSize:8.5,color:"#64748b",marginBottom:6}},"Green = improves the metric · Red = worsens it. Segments: Tilts / Vol scaling / Correlation flip."),
+                e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:10}},
+                  e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540"}},
+                    e("th",{style:{textAlign:"left",padding:"3px 4px",fontSize:8,color:"#475569",fontWeight:"bold"}},"TICKER"),
+                    e("th",{style:{textAlign:"right",padding:"3px 4px",fontSize:8,color:"#475569",fontWeight:"bold"}},"RISK CONTRIB"),
+                    e("th",{style:{textAlign:"right",padding:"3px 4px",fontSize:8,color:"#475569",fontWeight:"bold"}},"OF WHICH FLIP")
+                  )),
+                  e("tbody",null,a.positions.map(p=>e("tr",{key:p.ticker,style:{borderBottom:"1px solid #0a0f1c"}},
+                    e("td",{style:{padding:"3px 4px",color:"#cbd5e1",fontWeight:"bold"}},p.ticker),
+                    e("td",{style:{padding:"3px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#94a3b8"}},(p.rc_baseline*100).toFixed(1)+"% → "+(p.rc_regime*100).toFixed(1)+"%"),
+                    e("td",{style:{padding:"3px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:p.drc_from_flip>0.0001?"#ef4444":p.drc_from_flip<-0.0001?"#1D9E75":"#64748b"}},(p.drc_from_flip>=0?"+":"")+(p.drc_from_flip*100).toFixed(1)+"pp")
+                  )))
+                )
+              );
+            })(),
             e("div",{style:{fontSize:10,color:"#94a3b8",lineHeight:1.55,padding:"8px 10px",background:"rgba(99,102,241,.05)",border:"1px solid rgba(99,102,241,.15)",borderRadius:6,marginBottom:8}},stressResult.description),
             e("div",{style:{fontSize:9,color:"#475569",marginBottom:8,fontStyle:"italic",lineHeight:1.4}},"Max drawdown is a median across 1,000 simulated one-year paths — expected behavior, not guaranteed."),
             e("button",{className:"btn btn-d btn-full",onClick:()=>{setStressResult(null);setStressError(null);}},"Re-run")
