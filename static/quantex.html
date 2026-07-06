@@ -264,7 +264,7 @@ body{font-family:'DM Sans',sans-serif;background:#0a0e1a;color:#c8d2e0;font-size
 .login-divider{display:flex;align-items:center;gap:12px;margin:16px 0;color:#4a5568;font-size:11px}
 .login-divider::before,.login-divider::after{content:'';flex:1;height:1px;background:rgba(99,102,241,.1)}
 /* Landing Page */
-.landing-wrap{min-height:100vh;background:linear-gradient(135deg,#0a0e1a 0%,#0f1424 50%,#0a0e1a 100%);display:flex;justify-content:center;padding:48px 24px;position:relative}
+.landing-wrap{min-height:100vh;max-height:100vh;overflow-y:auto;background:linear-gradient(135deg,#0a0e1a 0%,#0f1424 50%,#0a0e1a 100%);display:flex;justify-content:center;padding:48px 24px;position:relative}
 .landing-container{max-width:1100px;width:100%;display:flex;flex-direction:column;gap:40px;align-items:center}
 .landing-hero{text-align:center;padding:24px 0 8px}
 .landing-brand{font-family:'Outfit',sans-serif;font-size:64px;font-weight:800;line-height:1;margin-bottom:16px;background:linear-gradient(135deg,#818cf8,#6366f1,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-1px}
@@ -286,6 +286,16 @@ body{font-family:'DM Sans',sans-serif;background:#0a0e1a;color:#c8d2e0;font-size
 .landing-signin-link{background:none;border:none;color:#475569;font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif}
 .landing-signin-link:hover{color:#64748b}
 .landing-footer{font-size:11px;color:#475569;padding:12px 0 8px}
+/* Landing proof section */
+.proof-section{width:100%;display:flex;flex-direction:column;gap:18px}
+.proof-label{font-size:11px;font-weight:700;letter-spacing:2px;color:#6366f1;text-align:center;text-transform:uppercase}
+.proof-grid{display:flex;gap:16px}
+.proof-block{flex:1;background:#0b0f1e;border:1px solid rgba(99,102,241,.15);border-radius:14px;padding:18px;display:flex;flex-direction:column}
+.proof-block-title{font-family:'Outfit',sans-serif;font-size:14px;font-weight:700;color:#e2e8f0;margin-bottom:12px;line-height:1.35}
+.proof-visual{background:rgba(15,20,40,.5);border:1px solid rgba(99,102,241,.1);border-radius:10px;padding:12px;margin-bottom:12px;flex:1}
+.proof-caption{font-size:11px;color:#94a3b8;line-height:1.55}
+.proof-strip{width:100%;background:rgba(99,102,241,.04);border:1px solid rgba(99,102,241,.12);border-radius:12px;padding:16px 22px;font-size:12px;color:#94a3b8;line-height:1.65;text-align:center}
+.proof-strip b{color:#a5b4fc;font-weight:700}
 /* Factor Sliders */
 .factor-panel{background:rgba(99,102,241,.04);border:1px solid rgba(99,102,241,.1);border-radius:10px;padding:12px;margin-bottom:12px}
 .factor-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
@@ -2925,31 +2935,83 @@ function LoginGate({children}){
       e("div",{className:"landing-container"},
         e("div",{className:"landing-hero"},
           e("div",{className:"landing-brand"},"Quantex"),
-          e("div",{className:"landing-headline"},"Portfolio analysis with driver modes"),
-          e("div",{className:"landing-tag"},"Quantitative rigor. Qualitative judgment. Both in one tool.")
+          e("div",{className:"landing-headline"},"The investing tool that shows its work."),
+          e("div",{className:"landing-sub"},"Screen real stocks, optimize real portfolios, practice real order types — with every signal, assumption, and disagreement explained. Nothing gamified, nothing hidden.")
         ),
         e("div",{className:"landing-cards"},
           e("div",{className:"value-card"},
-            e("div",{className:"value-icon"},"🟢"),
-            e("div",{className:"value-title"},"Beginner Mode"),
-            e("div",{className:"value-body"},"Guided portfolio analysis in plain language. Learn what your numbers mean without a finance degree.")
-          ),
-          e("div",{className:"value-card"},
             e("div",{className:"value-icon"},"🟡"),
             e("div",{className:"value-title"},"Track Mode"),
-            e("div",{className:"value-body"},"Real portfolio tools — correlations, optimization, risk metrics — with fundamental and technical analysis explained through CFA and MBA curricula.")
+            e("div",{className:"value-body"},"Guided path through the core tools with explanations at every step.")
           ),
           e("div",{className:"value-card"},
             e("div",{className:"value-icon"},"🔴"),
             e("div",{className:"value-title"},"Full Pro Mode"),
-            e("div",{className:"value-body"},"Professional analysis: Ledoit-Wolf shrinkage, stress testing, efficient frontiers, fundamental and technical indicators, strategic context. Full depth on demand.")
+            e("div",{className:"value-body"},"Everything unlocked: screening, optimization, stress testing, paper trading.")
           )
+        ),
+        e("div",{className:"proof-section"},
+          e("div",{className:"proof-label"},"Proof, not promises"),
+          e("div",{className:"proof-grid"},
+            e("div",{className:"proof-block"},
+              e("div",{className:"proof-block-title"},"Our signals admit when they disagree."),
+              e("div",{className:"proof-visual"},
+                e("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,paddingBottom:10,marginBottom:10,borderBottom:"1px solid #1a2540"}},
+                  e("div",{style:{display:"flex",alignItems:"center",gap:8,minWidth:0}},
+                    e("span",{style:{fontWeight:"bold",color:"#534AB7",fontFamily:"'JetBrains Mono',monospace",fontSize:12}},"MSFT"),
+                    e("span",{style:{fontSize:10,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"Microsoft Corp.")
+                  ),
+                  e("div",{style:{display:"flex",alignItems:"center",gap:6,flexShrink:0}},
+                    e("span",{style:{fontSize:8,color:"#64748b",letterSpacing:.5}},"SIGNAL"),
+                    e("span",{style:{color:"#1D9E75",fontSize:11,fontWeight:"bold"}},"Strong Buy")
+                  )
+                ),
+                e("div",{style:{background:"rgba(11,15,30,.82)",border:"1px solid rgba(99,102,241,.2)",borderRadius:6,padding:"8px 10px"}},
+                  e("div",{style:{fontSize:8,color:"#64748b",marginBottom:4}},"INDICATOR CONSENSUS"),
+                  e("div",{style:{fontSize:18,color:"#f59e0b",fontWeight:"bold",lineHeight:1}},"HOLD"),
+                  e("div",{style:{fontSize:8,color:"#64748b",marginTop:4}},"Based on 4 indicator families"),
+                  e("div",{style:{fontSize:8,color:"#475569",fontStyle:"italic",marginTop:2}},"Technical view · may differ from Discovery's fundamental signal")
+                )
+              ),
+              e("div",{className:"proof-caption"},"Fundamentals and technicals can disagree. We show you both and explain why — disagreement is information, not an error.")
+            ),
+            e("div",{className:"proof-block"},
+              e("div",{className:"proof-block-title"},"Our optimizer tells you what it's optimizing."),
+              e("div",{className:"proof-visual",style:{display:"flex",flexDirection:"column",gap:6}},
+                [["Best return per unit of risk","Highest Sharpe ratio"],
+                 ["Lowest possible risk","Minimum volatility"],
+                 ["Spread risk evenly","Equal risk contribution"],
+                 ["Maximum diversification benefit","Largest diversification ratio"]].map(([t,s])=>
+                  e("div",{key:t,className:"opt-goal-card",style:{margin:0,cursor:"default",padding:"6px 9px"}},
+                    e("div",{style:{fontSize:11,fontWeight:"bold",color:"#e2e8f0"}},t),
+                    e("div",{style:{fontSize:9,color:"#94a3b8",marginTop:1}},s)
+                  ))
+              ),
+              e("div",{className:"proof-caption"},"Four strategies in plain English. Pick what you actually want.")
+            ),
+            e("div",{className:"proof-block"},
+              e("div",{className:"proof-block-title"},"Our house view cites its sources."),
+              e("div",{className:"proof-visual"},
+                e("div",{style:{fontSize:12,fontWeight:700,color:"#a5b4fc",marginBottom:4,letterSpacing:.3}},"2026 Co-CIO Outlook"),
+                e("div",{style:{fontSize:8,color:"#64748b",marginBottom:10,fontStyle:"italic",lineHeight:1.4}},"Based on commentary from Fort Washington Co-CIOs Christopher Shipley & Brendan White, 2025-2026"),
+                e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:10}},
+                  e("tbody",null,[["Financial Services","+1.5%"],["Healthcare","+1.0%"],["Technology","-1.0%"]].map(([sec,t])=>
+                    e("tr",{key:sec,style:{borderBottom:"1px solid #1a2540"}},
+                      e("td",{style:{padding:"5px 4px",color:"#cbd5e1"}},sec),
+                      e("td",{style:{padding:"5px 4px",textAlign:"right",fontWeight:"bold",fontFamily:"'JetBrains Mono',monospace",color:t.startsWith("+")?"#1D9E75":"#ef4444"}},t)
+                    )))
+                )
+              ),
+              e("div",{className:"proof-caption"},"Every assumption visible, every tilt sourced, every stress test decomposed into its causes.")
+            )
+          ),
+          e("div",{className:"proof-strip"},"Before any user touched this product, it was run through an ",e("b",null,"18-gate shakedown against sealed predictions"),". Six findings. All fixed and regression-tested. That's what showing your work means.")
         ),
         e("div",{className:"landing-cta"},
           e("button",{className:"landing-signup-btn",onClick:()=>{setMode("signup");setShowForm(true);}},"Sign Up Free"),
           e("button",{className:"landing-guest-link",onClick:guest},"Try as guest first")
         ),
-        e("div",{className:"landing-footer"},"Quantex — educational tool, not investment advice")
+        e("div",{className:"landing-footer"},"Educational tool · Paper trading only · Not investment advice")
       )
     ),
     showForm&&e("div",{onClick:()=>setShowForm(false),style:{position:"fixed",inset:0,background:"rgba(0,0,0,.72)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
@@ -3356,6 +3418,19 @@ function CourseHub({profile,ports,activePort}){
   );
 }
 
+// ── Learn (re-shelves Course + Challenges) ────────────────────────────────────
+function Learn({profile,ports,activePort}){
+  const[sub,setSub]=useState("course");
+  return e("div",null,
+    e("div",{style:{display:"flex",gap:8,marginBottom:14}},
+      [["course","📚 Course"],["challenges","🎯 Challenges"]].map(([id,l])=>
+        e("button",{key:id,className:"btn btn-xs"+(sub===id?" btn-p":""),onClick:()=>setSub(id)},l))
+    ),
+    sub==="course"&&e(CourseHub,{profile,ports,activePort}),
+    sub==="challenges"&&e(Challenges,{profile,ports,activePort})
+  );
+}
+
 // ── Root App ──────────────────────────────────────────────────────────────────
 function App({user,logout}){
   const[profile,setProfile]=useState(()=>{try{const s=localStorage.getItem("qx_profile");return s?JSON.parse(s):null;}catch(e){return null;}});
@@ -3443,8 +3518,7 @@ function App({user,logout}){
     {id:"trades",l:"TRADE DESK",lk:locked},
     {id:"deriv",l:"⚡ DERIVATIVES",lk:false},
     {id:"paper",l:"📄 PAPER TRADE",lk:false},
-    {id:"challenges",l:"🎯 CHALLENGES",lk:false},
-    {id:"course",l:"📚 COURSE",lk:false},
+    {id:"learn",l:"📚 LEARN",lk:false},
     {id:"compare",l:"⇄ COMPARE",lk:locked},
     {id:"pA",l:"◈ A",lk:locked,pn:"A"},{id:"pB",l:"◈ B",lk:locked,pn:"B"},{id:"pC",l:"◈ C",lk:locked,pn:"C"},
   ];
@@ -3475,8 +3549,7 @@ function App({user,logout}){
         tab==="trades"&&e(TradeDeck,{weights:aw,profile}),
         tab==="deriv"&&e(DerivativesSandbox,{backendOk}),
         tab==="paper"&&e(PaperTrading,{backendOk}),
-        tab==="challenges"&&e(Challenges,{profile,ports,activePort:ap}),
-        tab==="course"&&e(CourseHub,{profile,ports,activePort:ap}),
+        tab==="learn"&&e(Learn,{profile,ports,activePort:ap}),
         tab==="compare"&&e(Compare,{ports}),
         tab==="pA"&&e(PortTab,{name:"Portfolio A",weights:ports.A,profile,onUpdate:(id,v)=>updateW("A",id,v),onRemove:id=>rmFromPort("A",id),onOpt:(goal,mp,ao)=>optPort("A",goal,mp,ao),optLoading}),
         tab==="pB"&&e(PortTab,{name:"Portfolio B",weights:ports.B,profile,onUpdate:(id,v)=>updateW("B",id,v),onRemove:id=>rmFromPort("B",id),onOpt:(goal,mp,ao)=>optPort("B",goal,mp,ao),optLoading}),
