@@ -38,6 +38,8 @@ from app.models import (
     StressTestRequest,
     StressTestResponse,
     StressMetrics,
+    SandboxStressRequest,
+    RegimeInput,
     FrontierRequest,
     FrontierResponse,
     ScreenRequest,
@@ -1087,68 +1089,113 @@ async def optimize(req: OptimizeRequest):
     )
 
 
-@app.post("/api/stress_test_2026", response_model=StressTestResponse)
-async def stress_test_2026(req: StressTestRequest):
+# Sandbox regime bounds (spec section 1). Enforced here (API) and in the UI.
+_TILT_BOUND_PP = 5.0          # tilts in percentage points
+_VOL_MULT_BOUNDS = (0.5, 2.0)
+_RHO_BOUNDS = (-0.95, 0.95)
+
+
+def _validate_regime_bounds(regime: RegimeInput) -> None:
+    """422 (naming the field) when any regime parameter is out of bounds."""
+    for sec, pp in regime.tilts.items():
+        if not (-_TILT_BOUND_PP <= pp <= _TILT_BOUND_PP):
+            raise HTTPException(
+                status_code=422,
+                detail=f"tilts['{sec}'] = {pp}pp out of bounds [-5.0, +5.0]",
+            )
+    lo, hi = _VOL_MULT_BOUNDS
+    for sec, m in regime.vol_multipliers.items():
+        if not (lo <= m <= hi):
+            raise HTTPException(
+                status_code=422,
+                detail=f"vol_multipliers['{sec}'] = {m} out of bounds [0.5, 2.0]",
+            )
+    rlo, rhi = _RHO_BOUNDS
+    for k, ov in enumerate(regime.correlation_overrides):
+        if not (rlo <= ov.rho <= rhi):
+            raise HTTPException(
+                status_code=422,
+                detail=f"correlation_overrides[{k}].rho = {ov.rho} out of bounds [-0.95, +0.95]",
+            )
+
+
+def _build_internal_regime(regime: RegimeInput) -> dict:
+    """RegimeInput (tilts in pp) -> engine regime dict (tilts in decimal)."""
+    return {
+        "name": regime.name,
+        "tilts": {sec: pp / 100.0 for sec, pp in regime.tilts.items()},
+        "vol_multipliers": dict(regime.vol_multipliers),
+        "correlation_overrides": [
+            {"a": ov.a, "b": ov.b, "rho": ov.rho} for ov in regime.correlation_overrides
+        ],
+    }
+
+
+def _run_regime_stress(
+    req_tickers: list[str],
+    weights_pct: dict[str, float],
+    window: int,
+    include_attribution: bool,
+    regime: dict,
+    description: str,
+) -> StressTestResponse:
     """
-    Compare the user's current portfolio under baseline (historical) assumptions
-    vs the 2026 Co-CIO Outlook regime — sector return tilts, sector vol scaling,
-    and a stock-bond correlation override. Max drawdown estimated via 1000-path
-    Monte Carlo over a 1-year horizon.
+    Shared regime stress engine: baseline vs regime metrics + full T/V/C
+    attribution + PSD-guard outcome. Both /api/stress_test_2026 (with the 2026
+    preset) and /api/sandbox/stress (with a user regime) call through here, so a
+    2026 regime posted to the sandbox is numerically identical to the preset run.
     """
-    _ensure_data(req.tickers)
+    _ensure_data(req_tickers)
     returns = _store["returns"]
     normal_returns = _store["normal_returns"]
     stress_returns = _store["stress_returns"]
 
-    try:
-        cov_result = build_covariance_matrix(
-            normal_returns, stress_returns, req.tickers,
-            lam=DEFAULT_LAMBDA, window=req.window,
+    from app.coc_io_outlook import (
+        apply_regime, _regime_cov_states, compute_attribution, monte_carlo_max_drawdown,
+    )
+    from app.screener import _SECTORS
+
+    cov_result = build_covariance_matrix(
+        normal_returns, stress_returns, req_tickers,
+        lam=DEFAULT_LAMBDA, window=window,
+    )
+    tickers = cov_result.tickers
+    exp_ret, _betas = _get_expected_returns_and_betas(returns, tickers)
+
+    w = np.array([weights_pct.get(t, 0.0) / 100.0 for t in tickers])
+    if w.sum() <= 0:
+        raise HTTPException(status_code=422, detail="Weights must sum to a positive value")
+    w = w / w.sum()
+
+    sectors_map = {t: (_SECTORS.get(t) or {}).get("sector") for t in tickers}
+
+    # Baseline (historical) metrics
+    base_ret = float(w @ exp_ret)
+    base_vol = float(np.sqrt(max(w @ cov_result.matrix @ w, 0.0)))
+    base_sh = ((base_ret - RISK_FREE_RATE) / base_vol) if base_vol > 1e-10 else 0.0
+
+    # Regime-adjusted metrics (PSD-guarded correlation structure)
+    regime_ret_vec, regime_cov = apply_regime(
+        exp_ret, cov_result.matrix, tickers, sectors_map, regime)
+    regime_ret = float(w @ regime_ret_vec)
+    regime_vol = float(np.sqrt(max(w @ regime_cov @ w, 0.0)))
+    regime_sh = ((regime_ret - RISK_FREE_RATE) / regime_vol) if regime_vol > 1e-10 else 0.0
+
+    psd_adjustment = _regime_cov_states(
+        cov_result.matrix, tickers, sectors_map, regime)["psd_adjustment"]
+
+    # Max drawdown. When attribution is on, its waterfall computes the [none]
+    # and [T,V,C] endpoints — reuse them so components sum exactly to the
+    # reported Δ (shared seed). Otherwise run the two MC states directly.
+    attribution = None
+    if include_attribution:
+        attribution, base_mdd, regime_mdd = compute_attribution(
+            exp_ret, cov_result.matrix, w, tickers, sectors_map, RISK_FREE_RATE,
+            regime=regime,
         )
-        tickers = cov_result.tickers
-        exp_ret, _betas = _get_expected_returns_and_betas(returns, tickers)
-
-        w = np.array([req.weights.get(t, 0.0) / 100.0 for t in tickers])
-        if w.sum() <= 0:
-            raise HTTPException(status_code=422, detail="Weights must sum to a positive value")
-        w = w / w.sum()
-
-        from app.coc_io_outlook import (
-            apply_regime, REGIME_2026, compute_attribution, monte_carlo_max_drawdown,
-        )
-        from app.screener import _SECTORS
-        sectors_map = {t: (_SECTORS.get(t) or {}).get("sector") for t in tickers}
-
-        # Baseline (historical) metrics
-        base_ret = float(w @ exp_ret)
-        base_vol = float(np.sqrt(max(w @ cov_result.matrix @ w, 0.0)))
-        base_sh = ((base_ret - RISK_FREE_RATE) / base_vol) if base_vol > 1e-10 else 0.0
-
-        # Regime-adjusted metrics
-        regime_ret_vec, regime_cov = apply_regime(exp_ret, cov_result.matrix, tickers, sectors_map)
-        regime_ret = float(w @ regime_ret_vec)
-        regime_vol = float(np.sqrt(max(w @ regime_cov @ w, 0.0)))
-        regime_sh = ((regime_ret - RISK_FREE_RATE) / regime_vol) if regime_vol > 1e-10 else 0.0
-
-        # Max drawdown. When attribution is on, its waterfall computes the [none]
-        # and [T,V,C] endpoints — reuse them so components sum exactly to the
-        # reported Δ (shared seed). Otherwise run the two MC states directly.
-        attribution = None
-        if req.include_attribution:
-            attribution, base_mdd, regime_mdd = compute_attribution(
-                exp_ret, cov_result.matrix, w, tickers, sectors_map, RISK_FREE_RATE,
-            )
-        else:
-            base_mdd = monte_carlo_max_drawdown(w, exp_ret, cov_result.matrix, seed=42)
-            regime_mdd = monte_carlo_max_drawdown(w, regime_ret_vec, regime_cov, seed=42)
-
-    except HTTPException:
-        raise
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:
-        logger.error(f"Stress test failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Stress test failed: {exc}")
+    else:
+        base_mdd = monte_carlo_max_drawdown(w, exp_ret, cov_result.matrix, seed=42)
+        regime_mdd = monte_carlo_max_drawdown(w, regime_ret_vec, regime_cov, seed=42)
 
     return StressTestResponse(
         baseline=StressMetrics(
@@ -1163,9 +1210,59 @@ async def stress_test_2026(req: StressTestRequest):
             sharpe_ratio=round(regime_sh, 4),
             max_drawdown=round(regime_mdd, 6),
         ),
-        description=REGIME_2026["description"],
+        description=description,
         attribution=attribution,
+        psd_adjustment=psd_adjustment,
     )
+
+
+@app.post("/api/stress_test_2026", response_model=StressTestResponse)
+async def stress_test_2026(req: StressTestRequest):
+    """
+    Compare the user's current portfolio under baseline (historical) assumptions
+    vs the 2026 Co-CIO Outlook regime — sector return tilts, sector vol scaling,
+    and a stock-bond correlation override. Max drawdown estimated via 1000-path
+    Monte Carlo over a 1-year horizon. Internally runs the shared sandbox engine
+    with the REGIME_2026 preset (PSD guard verified per run, expected no-op).
+    """
+    from app.coc_io_outlook import REGIME_2026
+    try:
+        return _run_regime_stress(
+            req.tickers, req.weights, req.window, req.include_attribution,
+            REGIME_2026, REGIME_2026["description"],
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Stress test failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Stress test failed: {exc}")
+
+
+@app.post("/api/sandbox/stress", response_model=StressTestResponse)
+async def sandbox_stress(req: SandboxStressRequest):
+    """
+    View Sandbox: run a user-defined regime (tilts / vol multipliers /
+    correlation overrides) through the same stress + attribution machinery as the
+    2026 preset. Bounds are enforced (422) before the run; the response carries
+    the PSD-guard outcome so the UI can disclose any correlation repair.
+    """
+    _validate_regime_bounds(req.regime)
+    internal = _build_internal_regime(req.regime)
+    description = req.regime.name or "Custom scenario"
+    try:
+        return _run_regime_stress(
+            req.tickers, req.weights, req.window, req.include_attribution,
+            internal, description,
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.error(f"Sandbox stress failed: {exc}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Sandbox stress failed: {exc}")
 
 
 @app.post("/api/optimize/all", response_model=MultiOptimizeResponse)

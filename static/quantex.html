@@ -1483,6 +1483,164 @@ function PortfolioChart({weights}){
   );
 }
 
+// ── Shared regime-result body ─────────────────────────────────────────────────
+// Renders the CURRENT-vs-REGIME metrics table, T/V/C attribution, the PSD-guard
+// disclosure (when the correlation structure had to be repaired), the scenario
+// description, and the Finding-5 framing line. Used by BOTH the 2026 regime card
+// and the Scenario Sandbox card so every regime result reads identically.
+function regimeResultBody(res,fmtPct,regimeLabel){
+  const b=res.baseline,r=res.regime,psd=res.psd_adjustment;
+  const ROWS=[
+    ["Expected Return",fmtPct(b.expected_return,true),fmtPct(r.expected_return,true),r.expected_return>=b.expected_return],
+    ["Volatility",fmtPct(b.volatility),fmtPct(r.volatility),r.volatility<=b.volatility],
+    ["Sharpe Ratio",b.sharpe_ratio.toFixed(2),r.sharpe_ratio.toFixed(2),r.sharpe_ratio>=b.sharpe_ratio],
+    ["Est. Max Drawdown",fmtPct(b.max_drawdown),fmtPct(r.max_drawdown),r.max_drawdown>=b.max_drawdown],
+  ];
+  return e(React.Fragment,null,
+    e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11,marginBottom:10}},
+      e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540"}},
+        e("th",{style:{padding:"6px 4px",textAlign:"left",fontSize:9,color:"#475569",fontWeight:"bold",letterSpacing:.3}},""),
+        e("th",{style:{padding:"6px 4px",textAlign:"right",fontSize:9,color:"#94a3b8",fontWeight:"bold",letterSpacing:.3}},"CURRENT"),
+        e("th",{style:{padding:"6px 4px",textAlign:"right",fontSize:9,color:"#a5b4fc",fontWeight:"bold",letterSpacing:.3}},regimeLabel)
+      )),
+      e("tbody",null,ROWS.map(([lbl,bv,rv,better])=>e("tr",{key:lbl,style:{borderBottom:"1px solid #0a0f1c"}},
+        e("td",{style:{padding:"6px 4px",color:"#cbd5e1"}},lbl),
+        e("td",{style:{padding:"6px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#94a3b8"}},bv),
+        e("td",{style:{padding:"6px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:"bold",color:better?"#1D9E75":"#ef4444"}},rv)
+      )))
+    ),
+    res.attribution&&(()=>{
+      const a=res.attribution;const G="#1D9E75",R="#ef4444";
+      const METRICS=[
+        {label:"Expected Return",dp:2,segs:[["Tilts",a.return.tilts]],good:1},
+        {label:"Volatility",dp:4,segs:[["Vol scaling",a.vol.vol_scaling],["Correlation",a.vol.correlation]],good:-1},
+        {label:"Sharpe Ratio",dp:4,segs:[["Tilts",a.sharpe.tilts],["Vol scaling",a.sharpe.vol_scaling],["Correlation",a.sharpe.correlation]],good:1},
+        {label:"Est. Max Drawdown",dp:4,segs:[["Tilts",a.mdd.tilts],["Vol scaling",a.mdd.vol_scaling],["Correlation",a.mdd.correlation]],good:1},
+      ];
+      const bar=(m)=>{const tot=m.segs.reduce((s,x)=>s+Math.abs(x[1]),0)||1;
+        return e("div",{style:{display:"flex",height:13,borderRadius:3,overflow:"hidden",background:"#0a0f1c"}},
+          m.segs.filter(x=>Math.abs(x[1])>1e-9).map(x=>e("div",{key:x[0],title:x[0]+": "+x[1].toFixed(4),style:{width:(Math.abs(x[1])/tot*100)+"%",background:x[1]*m.good>0?G:R,opacity:.85}})));};
+      return e("div",{style:{marginBottom:10,padding:"10px 12px",background:"rgba(99,102,241,.04)",border:"1px solid rgba(99,102,241,.12)",borderRadius:8}},
+        e("div",{style:{fontSize:10,fontWeight:700,color:"#a5b4fc",letterSpacing:.5,marginBottom:8}},"WHY — REGIME ATTRIBUTION"),
+        e("div",{style:{fontSize:10,color:"#cbd5e1",lineHeight:1.5,marginBottom:10}},a.headline),
+        METRICS.map(m=>e("div",{key:m.label,style:{marginBottom:7}},
+          e("div",{style:{display:"flex",justifyContent:"space-between",fontSize:9,color:"#94a3b8",marginBottom:2}},
+            e("span",null,m.label),
+            e("span",{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:8.5}},m.segs.map(x=>x[0][0]+" "+(x[1]>=0?"+":"")+x[1].toFixed(m.dp)).join("  "))
+          ),bar(m))),
+        e("div",{style:{fontSize:8.5,color:"#475569",fontStyle:"italic",marginTop:2,marginBottom:8}},"Drawdown attribution applies changes in order: tilts, vol, correlation."),
+        e("div",{style:{fontSize:8.5,color:"#64748b",marginBottom:6}},"Green = improves the metric · Red = worsens it. Segments: Tilts / Vol scaling / Correlation flip."),
+        e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:10}},
+          e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540"}},
+            e("th",{style:{textAlign:"left",padding:"3px 4px",fontSize:8,color:"#475569",fontWeight:"bold"}},"TICKER"),
+            e("th",{style:{textAlign:"right",padding:"3px 4px",fontSize:8,color:"#475569",fontWeight:"bold"}},"RISK CONTRIB"),
+            e("th",{style:{textAlign:"right",padding:"3px 4px",fontSize:8,color:"#475569",fontWeight:"bold"}},"OF WHICH FLIP")
+          )),
+          e("tbody",null,a.positions.map(p=>e("tr",{key:p.ticker,style:{borderBottom:"1px solid #0a0f1c"}},
+            e("td",{style:{padding:"3px 4px",color:"#cbd5e1",fontWeight:"bold"}},p.ticker),
+            e("td",{style:{padding:"3px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#94a3b8"}},(p.rc_baseline*100).toFixed(1)+"% → "+(p.rc_regime*100).toFixed(1)+"%"),
+            e("td",{style:{padding:"3px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:p.drc_from_flip>0.0001?"#ef4444":p.drc_from_flip<-0.0001?"#1D9E75":"#64748b"}},(p.drc_from_flip>=0?"+":"")+(p.drc_from_flip*100).toFixed(1)+"pp")
+          )))
+        )
+      );
+    })(),
+    psd&&psd.applied&&e("div",{style:{fontSize:10,color:"#fbbf24",lineHeight:1.55,padding:"8px 10px",background:"rgba(251,191,36,.07)",border:"1px solid rgba(251,191,36,.3)",borderRadius:6,marginBottom:8}},
+      e("div",{style:{marginBottom:(psd.affected_pairs&&psd.affected_pairs.length)?6:0}},"⚠ Your scenario implied an impossible correlation structure. The nearest valid version adjusts your specified correlations by up to "+psd.max_correlation_adjustment.toFixed(2)+" — shown below."),
+      psd.affected_pairs&&psd.affected_pairs.length>0&&e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:9.5}},
+        e("tbody",null,psd.affected_pairs.map((p,i)=>e("tr",{key:i,style:{borderBottom:"1px solid rgba(251,191,36,.12)"}},
+          e("td",{style:{padding:"2px 4px",color:"#fcd34d",fontFamily:"'JetBrains Mono',monospace"}},p.tickers.join(" · ")),
+          e("td",{style:{padding:"2px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#94a3b8"}},"requested "+p.requested.toFixed(2)),
+          e("td",{style:{padding:"2px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#fbbf24"}},"→ "+p.adjusted.toFixed(2))
+        )))
+      )
+    ),
+    res.description&&e("div",{style:{fontSize:10,color:"#94a3b8",lineHeight:1.55,padding:"8px 10px",background:"rgba(99,102,241,.05)",border:"1px solid rgba(99,102,241,.15)",borderRadius:6,marginBottom:8}},res.description),
+    e("div",{style:{fontSize:10,color:"#a5b4fc",lineHeight:1.5,padding:"8px 10px",background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.2)",borderRadius:6,marginBottom:8,fontStyle:"italic"}},"A regime isn't a crash test — an outlook can favor your positioning."),
+    e("div",{style:{fontSize:9,color:"#475569",marginBottom:8,fontStyle:"italic",lineHeight:1.4}},"Max drawdown is a median across 1,000 simulated one-year paths — expected behavior, not guaranteed.")
+  );
+}
+
+// ── Scenario Sandbox ──────────────────────────────────────────────────────────
+// User-defined regime through the same stress/attribution engine as the 2026
+// preset. Sector tilts (pp) and vol multipliers are per-sector; the stock-bond
+// slider becomes a Fixed-Income × Equity correlation override. Bounds are clamped
+// client-side (the API re-validates and 422s regardless).
+function ScenarioSandbox({tickers,weights}){
+  const EQ=["Technology","Financial Services","Healthcare","Industrials","Energy","Consumer Cyclical","Consumer Defensive","Utilities","Real Estate","Communication Services","Basic Materials","Fixed Income"];
+  const PRESET_T={Technology:-1.0,"Financial Services":1.5,Healthcare:1.0,Industrials:0.5,"Consumer Cyclical":-0.5,"Consumer Defensive":0.5,"Fixed Income":0.5};
+  const PRESET_M={Technology:1.1,"Financial Services":1.05,Healthcare:0.95,Energy:1.15,"Fixed Income":1.1};
+  const INP={width:52,background:"#0a0f1c",border:"1px solid #1a2540",borderRadius:4,color:"#cbd5e1",fontSize:10,padding:"2px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace"};
+  const[open,setOpen]=useState(false);
+  const[tilts,setTilts]=useState({});
+  const[mults,setMults]=useState({});
+  const[rho,setRho]=useState(0);
+  const[res,setRes]=useState(null);
+  const[loading,setLoading]=useState(false);
+  const[err,setErr]=useState(null);
+  const fmtPct=(x,signed)=>{const v=x*100;return (signed&&v>0?"+":"")+v.toFixed(2)+"%";};
+  const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+  const setTilt=(s,v)=>setTilts(o=>({...o,[s]:v===""?"":clamp(parseFloat(v)||0,-5,5)}));
+  const setMult=(s,v)=>setMults(o=>({...o,[s]:v===""?"":clamp(parseFloat(v)||1,0.5,2)}));
+  const loadPreset=()=>{setTilts({...PRESET_T});setMults({...PRESET_M});setRho(0.2);};
+  const clear=()=>{setTilts({});setMults({});setRho(0);};
+  const run=async()=>{
+    if(tickers.length<2)return;
+    const regime={name:"Custom scenario",
+      tilts:Object.fromEntries(Object.entries(tilts).filter(([,v])=>v!==""&&v!==0)),
+      vol_multipliers:Object.fromEntries(Object.entries(mults).filter(([,v])=>v!==""&&v!==1)),
+      correlation_overrides:rho?[{a:"Fixed Income",b:"EQUITY",rho:clamp(rho,-0.95,0.95)}]:[]};
+    setLoading(true);setErr(null);setRes(null);
+    try{const data=await apiFetch("/api/sandbox/stress",{tickers,weights,regime});setRes(data);}
+    catch(e2){setErr(e2.message||"Sandbox failed");}
+    finally{setLoading(false);}
+  };
+  return e("div",{className:"card",style:{marginTop:14}},
+    e("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer"},onClick:()=>setOpen(o=>!o)},
+      e("div",{className:"card-title",style:{marginBottom:0}},"SCENARIO SANDBOX"),
+      e("span",{style:{color:"#64748b",fontSize:12}},open?"▾":"▸")
+    ),
+    e("div",{style:{fontSize:11,color:"#64748b",margin:"6px 0 10px",lineHeight:1.5}},"Build your own regime — sector return tilts, volatility multipliers, and a stock-bond correlation — and stress this portfolio through the same engine as the 2026 outlook."),
+    open&&e(React.Fragment,null,
+      e("div",{style:{display:"flex",gap:6,marginBottom:10}},
+        e("button",{className:"btn btn-d",style:{flex:1,fontSize:10},onClick:loadPreset},"Load 2026 preset"),
+        e("button",{className:"btn btn-d",style:{flex:1,fontSize:10},onClick:clear},"Clear")
+      ),
+      e("div",{style:{maxHeight:220,overflowY:"auto",marginBottom:10,border:"1px solid #131c30",borderRadius:6}},
+        e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:10}},
+          e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540",position:"sticky",top:0,background:"#0d1424"}},
+            e("th",{style:{textAlign:"left",padding:"4px 6px",fontSize:8,color:"#475569"}},"SECTOR"),
+            e("th",{style:{textAlign:"right",padding:"4px 6px",fontSize:8,color:"#475569"}},"TILT pp (±5)"),
+            e("th",{style:{textAlign:"right",padding:"4px 6px",fontSize:8,color:"#475569"}},"VOL × (.5–2)")
+          )),
+          e("tbody",null,EQ.map(s=>e("tr",{key:s,style:{borderBottom:"1px solid #0a0f1c"}},
+            e("td",{style:{padding:"3px 6px",color:"#cbd5e1"}},s),
+            e("td",{style:{padding:"3px 6px",textAlign:"right"}},e("input",{type:"number",step:0.5,value:tilts[s]??"",placeholder:"0",onChange:ev=>setTilt(s,ev.target.value),style:INP})),
+            e("td",{style:{padding:"3px 6px",textAlign:"right"}},e("input",{type:"number",step:0.05,value:mults[s]??"",placeholder:"1.0",onChange:ev=>setMult(s,ev.target.value),style:INP}))
+          )))
+        )
+      ),
+      e("div",{style:{marginBottom:10}},
+        e("div",{style:{display:"flex",justifyContent:"space-between",fontSize:10,color:"#94a3b8",marginBottom:4}},
+          e("span",null,"Stock–bond correlation (Fixed Income × Equity)"),
+          e("span",{style:{fontFamily:"'JetBrains Mono',monospace",color:"#a5b4fc"}},rho?rho.toFixed(2):"off")
+        ),
+        e("input",{type:"range",min:-0.95,max:0.95,step:0.05,value:rho,onChange:ev=>setRho(parseFloat(ev.target.value)),style:{width:"100%"}}),
+        e("div",{style:{fontSize:8.5,color:"#475569",marginTop:2}},"0 leaves historical correlations untouched. Positive = diversification weakens.")
+      ),
+      err&&e("div",{style:{fontSize:11,color:"#ef4444",padding:"8px 10px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.25)",borderRadius:6,marginBottom:8}},"⚠ "+err),
+      !res&&!loading&&e(React.Fragment,null,
+        e("button",{className:"btn btn-p btn-full",disabled:tickers.length<2,onClick:run},"Run Scenario"),
+        tickers.length<2&&e("div",{style:{fontSize:10,color:"#475569",textAlign:"center",marginTop:6}},"Add at least 2 assets to run")
+      ),
+      loading&&e("div",{style:{textAlign:"center",padding:"16px 0",fontSize:12,color:"#818cf8"}},e("span",{className:"spin"},"◌")," Running 1,000-path Monte Carlo…"),
+      res&&e(React.Fragment,null,
+        regimeResultBody(res,fmtPct,"SCENARIO"),
+        e("button",{className:"btn btn-d btn-full",onClick:()=>{setRes(null);setErr(null);}},"Edit scenario")
+      )
+    )
+  );
+}
+
 // ── Portfolio Builder ─────────────────────────────────────────────────────────
 function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
   const[optView,setOptView]=useState("picker");
@@ -1663,68 +1821,12 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
           e("span",{className:"spin"},"◌")," Running 1,000-path Monte Carlo…"
         ),
         stressError&&e("div",{style:{fontSize:11,color:"#ef4444",padding:"8px 10px",background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.25)",borderRadius:6,marginBottom:8}},"⚠ "+stressError),
-        stressResult&&(()=>{
-          const b=stressResult.baseline,r=stressResult.regime;
-          const ROWS=[
-            ["Expected Return",fmtPct(b.expected_return,true),fmtPct(r.expected_return,true),r.expected_return>=b.expected_return],
-            ["Volatility",fmtPct(b.volatility),fmtPct(r.volatility),r.volatility<=b.volatility],
-            ["Sharpe Ratio",b.sharpe_ratio.toFixed(2),r.sharpe_ratio.toFixed(2),r.sharpe_ratio>=b.sharpe_ratio],
-            ["Est. Max Drawdown",fmtPct(b.max_drawdown),fmtPct(r.max_drawdown),r.max_drawdown>=b.max_drawdown],
-          ];
-          return e(React.Fragment,null,
-            e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11,marginBottom:10}},
-              e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540"}},
-                e("th",{style:{padding:"6px 4px",textAlign:"left",fontSize:9,color:"#475569",fontWeight:"bold",letterSpacing:.3}},""),
-                e("th",{style:{padding:"6px 4px",textAlign:"right",fontSize:9,color:"#94a3b8",fontWeight:"bold",letterSpacing:.3}},"CURRENT"),
-                e("th",{style:{padding:"6px 4px",textAlign:"right",fontSize:9,color:"#a5b4fc",fontWeight:"bold",letterSpacing:.3}},"2026 REGIME")
-              )),
-              e("tbody",null,ROWS.map(([lbl,bv,rv,better])=>e("tr",{key:lbl,style:{borderBottom:"1px solid #0a0f1c"}},
-                e("td",{style:{padding:"6px 4px",color:"#cbd5e1"}},lbl),
-                e("td",{style:{padding:"6px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#94a3b8"}},bv),
-                e("td",{style:{padding:"6px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:"bold",color:better?"#1D9E75":"#ef4444"}},rv)
-              )))
-            ),
-            stressResult.attribution&&(()=>{
-              const a=stressResult.attribution;const G="#1D9E75",R="#ef4444";
-              const METRICS=[
-                {label:"Expected Return",dp:2,segs:[["Tilts",a.return.tilts]],good:1},
-                {label:"Volatility",dp:4,segs:[["Vol scaling",a.vol.vol_scaling],["Correlation",a.vol.correlation]],good:-1},
-                {label:"Sharpe Ratio",dp:4,segs:[["Tilts",a.sharpe.tilts],["Vol scaling",a.sharpe.vol_scaling],["Correlation",a.sharpe.correlation]],good:1},
-                {label:"Est. Max Drawdown",dp:4,segs:[["Tilts",a.mdd.tilts],["Vol scaling",a.mdd.vol_scaling],["Correlation",a.mdd.correlation]],good:1},
-              ];
-              const bar=(m)=>{const tot=m.segs.reduce((s,x)=>s+Math.abs(x[1]),0)||1;
-                return e("div",{style:{display:"flex",height:13,borderRadius:3,overflow:"hidden",background:"#0a0f1c"}},
-                  m.segs.filter(x=>Math.abs(x[1])>1e-9).map(x=>e("div",{key:x[0],title:x[0]+": "+x[1].toFixed(4),style:{width:(Math.abs(x[1])/tot*100)+"%",background:x[1]*m.good>0?G:R,opacity:.85}})));};
-              return e("div",{style:{marginBottom:10,padding:"10px 12px",background:"rgba(99,102,241,.04)",border:"1px solid rgba(99,102,241,.12)",borderRadius:8}},
-                e("div",{style:{fontSize:10,fontWeight:700,color:"#a5b4fc",letterSpacing:.5,marginBottom:8}},"WHY — REGIME ATTRIBUTION"),
-                e("div",{style:{fontSize:10,color:"#cbd5e1",lineHeight:1.5,marginBottom:10}},a.headline),
-                METRICS.map(m=>e("div",{key:m.label,style:{marginBottom:7}},
-                  e("div",{style:{display:"flex",justifyContent:"space-between",fontSize:9,color:"#94a3b8",marginBottom:2}},
-                    e("span",null,m.label),
-                    e("span",{style:{fontFamily:"'JetBrains Mono',monospace",fontSize:8.5}},m.segs.map(x=>x[0][0]+" "+(x[1]>=0?"+":"")+x[1].toFixed(m.dp)).join("  "))
-                  ),bar(m))),
-                e("div",{style:{fontSize:8.5,color:"#475569",fontStyle:"italic",marginTop:2,marginBottom:8}},"Drawdown attribution applies changes in order: tilts, vol, correlation."),
-                e("div",{style:{fontSize:8.5,color:"#64748b",marginBottom:6}},"Green = improves the metric · Red = worsens it. Segments: Tilts / Vol scaling / Correlation flip."),
-                e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:10}},
-                  e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540"}},
-                    e("th",{style:{textAlign:"left",padding:"3px 4px",fontSize:8,color:"#475569",fontWeight:"bold"}},"TICKER"),
-                    e("th",{style:{textAlign:"right",padding:"3px 4px",fontSize:8,color:"#475569",fontWeight:"bold"}},"RISK CONTRIB"),
-                    e("th",{style:{textAlign:"right",padding:"3px 4px",fontSize:8,color:"#475569",fontWeight:"bold"}},"OF WHICH FLIP")
-                  )),
-                  e("tbody",null,a.positions.map(p=>e("tr",{key:p.ticker,style:{borderBottom:"1px solid #0a0f1c"}},
-                    e("td",{style:{padding:"3px 4px",color:"#cbd5e1",fontWeight:"bold"}},p.ticker),
-                    e("td",{style:{padding:"3px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:"#94a3b8"}},(p.rc_baseline*100).toFixed(1)+"% → "+(p.rc_regime*100).toFixed(1)+"%"),
-                    e("td",{style:{padding:"3px 4px",textAlign:"right",fontFamily:"'JetBrains Mono',monospace",color:p.drc_from_flip>0.0001?"#ef4444":p.drc_from_flip<-0.0001?"#1D9E75":"#64748b"}},(p.drc_from_flip>=0?"+":"")+(p.drc_from_flip*100).toFixed(1)+"pp")
-                  )))
-                )
-              );
-            })(),
-            e("div",{style:{fontSize:10,color:"#94a3b8",lineHeight:1.55,padding:"8px 10px",background:"rgba(99,102,241,.05)",border:"1px solid rgba(99,102,241,.15)",borderRadius:6,marginBottom:8}},stressResult.description),
-            e("div",{style:{fontSize:9,color:"#475569",marginBottom:8,fontStyle:"italic",lineHeight:1.4}},"Max drawdown is a median across 1,000 simulated one-year paths — expected behavior, not guaranteed."),
-            e("button",{className:"btn btn-d btn-full",onClick:()=>{setStressResult(null);setStressError(null);}},"Re-run")
-          );
-        })()
-      )
+        stressResult&&e(React.Fragment,null,
+          regimeResultBody(stressResult,fmtPct,"2026 REGIME"),
+          e("button",{className:"btn btn-d btn-full",onClick:()=>{setStressResult(null);setStressError(null);}},"Re-run")
+        )
+      ),
+      e(ScenarioSandbox,{tickers,weights})
     ),
     e("div",{className:"builder-right"},
       stats&&e(React.Fragment,null,

@@ -154,6 +154,29 @@ class StressTestResponse(BaseModel):
     regime: StressMetrics
     description: str
     attribution: dict | None = None    # regime deterioration decomposed T/V/C
+    psd_adjustment: dict | None = None  # nearest-PSD repair of the correlation overrides
+
+
+class CorrelationOverride(BaseModel):
+    a: str = Field(..., description="Sector or the 'EQUITY' token")
+    b: str = Field(..., description="Sector or the 'EQUITY' token")
+    rho: float = Field(..., description="Target correlation for matching pairs")
+
+
+class RegimeInput(BaseModel):
+    """User-defined regime for the View Sandbox. Tilts are in percentage points."""
+    name: str | None = None
+    tilts: dict[str, float] = Field(default_factory=dict)              # sector -> pp
+    vol_multipliers: dict[str, float] = Field(default_factory=dict)    # sector -> multiplier
+    correlation_overrides: list[CorrelationOverride] = Field(default_factory=list)
+
+
+class SandboxStressRequest(BaseModel):
+    tickers: list[str] = Field(..., min_length=2, max_length=50)
+    weights: dict[str, float] = Field(..., description="Current weights as ticker → pct (0-100)")
+    regime: RegimeInput
+    window: int = Field(252, ge=60, le=1260)
+    include_attribution: bool = True
 
 
 class MultiOptimizeRequest(BaseModel):

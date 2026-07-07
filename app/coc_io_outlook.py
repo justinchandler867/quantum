@@ -96,11 +96,11 @@ def apply_outlook_tilts(
 # diversifying. When all three combine, diversified portfolios should look
 # meaningfully worse — that's the point of the stress test.
 
-# Sectors considered "equity" for the purpose of the stock-bond correlation
-# override. Fixed Income paired with any of these takes the regime correlation
-# in place of the historical one; pairs that include Commodity / Volatility /
-# International / Unknown / Fixed Income on both legs are left alone.
-_EQUITY_SECTORS = frozenset({
+# The "EQUITY" token in a correlation override expands to this equity-sector
+# list. Per spec: exclude Fixed Income, Commodity, Broad Market, International,
+# Volatility, and Unknown. A pair whose two legs match {a-set, b-set} of an
+# override takes that override's rho; all other correlations are preserved.
+_EQUITY_TOKEN_SECTORS = frozenset({
     "Technology",
     "Financial Services",
     "Healthcare",
@@ -112,11 +112,24 @@ _EQUITY_SECTORS = frozenset({
     "Real Estate",
     "Communication Services",
     "Basic Materials",
-    "Broad Market",
 })
 
 
+def _expand_sector_token(token: str) -> frozenset:
+    """"EQUITY" -> the equity-sector list; any other token -> just itself."""
+    if token == "EQUITY":
+        return _EQUITY_TOKEN_SECTORS
+    return frozenset({token})
+
+
+# The 2026 Co-CIO Outlook expressed as a regime instance: SECTOR_TILTS_2026 on
+# returns, per-sector vol scaling, and the stock-bond correlation override recast
+# as a single {Fixed Income × EQUITY -> 0.20} entry. Preset tilts are decimal
+# (matching SECTOR_TILTS_2026); the sandbox API accepts tilts in percentage
+# points and converts before building its regime.
 REGIME_2026 = {
+    "name": "2026 Co-CIO Outlook",
+    "tilts": SECTOR_TILTS_2026,
     "vol_multipliers": {
         "Technology":             1.10,
         "Financial Services":     1.05,
@@ -136,13 +149,64 @@ REGIME_2026 = {
         "Volatility":             1.00,
         "Unknown":                1.00,
     },
-    "stock_bond_correlation": 0.20,
+    "correlation_overrides": [
+        {"a": "Fixed Income", "b": "EQUITY", "rho": 0.20},
+    ],
     "description": (
         "Equities and credit spreads under late-cycle pressure; "
         "stock-bond correlation positive (diversification weakened); "
         "energy vol elevated; defensives slightly damped."
     ),
 }
+
+
+def _psd_guard(
+    corr: np.ndarray, tickers: list[str], requested: np.ndarray,
+) -> tuple[np.ndarray, dict]:
+    """
+    Nearest-PSD repair of a (post-override) correlation matrix.
+
+    If the min eigenvalue is < -1e-10, clip negative eigenvalues to 1e-8,
+    reconstruct C' = V diag(λ_clipped) Vᵀ, and rescale to unit diagonal
+    (D^-1/2 C' D^-1/2). Otherwise the matrix is returned UNCHANGED — no
+    reconstruction — so a valid regime (e.g. the 2026 preset) stays byte-exact.
+
+    Returns (corr_out, psd_adjustment) where psd_adjustment is
+    {applied, max_correlation_adjustment, affected_pairs: top-5
+     {tickers, requested, adjusted}} sorted by |adjustment| descending.
+    """
+    evals, evecs = np.linalg.eigh(corr)
+    lam_min = float(evals.min())
+    if lam_min >= -1e-10:
+        return corr, {"applied": False, "max_correlation_adjustment": 0.0, "affected_pairs": []}
+
+    clipped = np.clip(evals, 1e-8, None)
+    recon = (evecs * clipped) @ evecs.T
+    d = np.sqrt(np.clip(np.diag(recon), 1e-16, None))
+    corr_out = recon / np.outer(d, d)
+    np.fill_diagonal(corr_out, 1.0)
+    corr_out = np.clip(corr_out, -1.0, 1.0)
+
+    n = corr.shape[0]
+    scored = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            scored.append((abs(corr_out[i, j] - requested[i, j]), i, j))
+    scored.sort(reverse=True, key=lambda x: x[0])
+    max_adj = scored[0][0] if scored else 0.0
+    affected = [
+        {
+            "tickers": [tickers[i], tickers[j]],
+            "requested": round(float(requested[i, j]), 6),
+            "adjusted": round(float(corr_out[i, j]), 6),
+        }
+        for (adj, i, j) in scored[:5] if adj > 1e-12
+    ]
+    return corr_out, {
+        "applied": True,
+        "max_correlation_adjustment": round(float(max_adj), 6),
+        "affected_pairs": affected,
+    }
 
 
 def apply_regime(
@@ -156,21 +220,22 @@ def apply_regime(
     Apply the full 2026 Co-CIO Outlook regime to (μ, Σ).
 
     Three transformations:
-      1. Sector tilts on expected returns (SECTOR_TILTS_2026).
+      1. Sector tilts on expected returns (regime['tilts']).
       2. Sector-specific vol scaling: σ'_i = σ_i × m(sector_i).
-      3. Stock-bond correlation override: pairs of (equity, fixed income)
-         have their correlation replaced with regime['stock_bond_correlation'].
-         All other correlations preserved.
+      3. Correlation overrides: each {a, b, rho} entry (with "EQUITY" expanded)
+         replaces the correlation of every matching sector pair; the resulting
+         matrix passes the PSD guard. All other correlations preserved.
 
     Reconstruction: Σ' = D' R' D' where D' = diag(σ'), R' is the modified
-    correlation matrix.
+    (PSD-repaired) correlation matrix.
 
     Pure function — does not mutate inputs.
     """
     if regime is None:
         regime = REGIME_2026
 
-    new_returns = apply_outlook_tilts(expected_returns, tickers, sectors)
+    new_returns = apply_outlook_tilts(
+        expected_returns, tickers, sectors, tilts=regime.get("tilts"))
     states = _regime_cov_states(cov_matrix, tickers, sectors, regime)
     return new_returns, states["Sigma_R"]
 
@@ -187,11 +252,13 @@ def _regime_cov_states(
       Sigma_0 : the original covariance (returned verbatim, not reconstructed,
                 so downstream vols/MC match the baseline exactly).
       Sigma_V : per-sector vol scaling applied, original correlations kept.
-      Sigma_C : original vols, stock-bond correlation flip applied.
+      Sigma_C : original vols, correlation overrides (PSD-repaired) applied.
       Sigma_R : both (== apply_regime's output).
 
-    Also returns the decomposed pieces (σ vectors and ρ matrices) so the
-    Shapley states can be assembled without re-decomposing.
+    Also returns the decomposed pieces (σ vectors and ρ matrices) plus the
+    psd_adjustment so the caller can surface the guard's outcome. The Shapley
+    states are assembled from corr_C (the post-guard matrix), so attribution and
+    the reported metrics share one correlation structure.
     """
     vols = np.sqrt(np.clip(np.diag(cov_matrix), 0.0, None))
     safe = np.where(vols > 1e-12, vols, 1e-12)
@@ -200,37 +267,41 @@ def _regime_cov_states(
     corr = np.clip(corr, -1.0, 1.0)
 
     # Per-sector vol scaling.
-    mults = regime["vol_multipliers"]
+    mults = regime.get("vol_multipliers") or {}
     new_vols = vols.copy()
     for i, t in enumerate(tickers):
         sec = sectors.get(t) or "Unknown"
         new_vols[i] *= mults.get(sec, 1.0)
 
-    # Stock-bond correlation override: equity × Fixed-Income pairs -> regime rho.
-    sb_rho = float(regime["stock_bond_correlation"])
+    # Correlation overrides: each {a, b, rho} replaces every matching sector
+    # pair's correlation ("EQUITY" expands to the equity-sector list).
     new_corr = corr.copy()
     n = len(tickers)
-    for i in range(n):
-        sec_i = sectors.get(tickers[i]) or "Unknown"
-        for j in range(i + 1, n):
-            sec_j = sectors.get(tickers[j]) or "Unknown"
-            stock_bond = (
-                (sec_i == "Fixed Income" and sec_j in _EQUITY_SECTORS) or
-                (sec_j == "Fixed Income" and sec_i in _EQUITY_SECTORS)
-            )
-            if stock_bond:
-                new_corr[i, j] = sb_rho
-                new_corr[j, i] = sb_rho
+    secs = [sectors.get(t) or "Unknown" for t in tickers]
+    for ov in (regime.get("correlation_overrides") or []):
+        a_set = _expand_sector_token(ov["a"])
+        b_set = _expand_sector_token(ov["b"])
+        rho = float(ov["rho"])
+        for i in range(n):
+            for j in range(i + 1, n):
+                si, sj = secs[i], secs[j]
+                if (si in a_set and sj in b_set) or (si in b_set and sj in a_set):
+                    new_corr[i, j] = rho
+                    new_corr[j, i] = rho
+
+    # PSD guard on the post-override correlation matrix (no-op when already PSD).
+    corr_C, psd_adjustment = _psd_guard(new_corr, tickers, new_corr)
 
     return {
         "Sigma_0": cov_matrix,
         "Sigma_V": np.outer(new_vols, new_vols) * corr,
-        "Sigma_C": np.outer(vols, vols) * new_corr,
-        "Sigma_R": np.outer(new_vols, new_vols) * new_corr,
+        "Sigma_C": np.outer(vols, vols) * corr_C,
+        "Sigma_R": np.outer(new_vols, new_vols) * corr_C,
         "vols_0": vols,
         "vols_V": new_vols,
         "corr_0": corr,
-        "corr_C": new_corr,
+        "corr_C": corr_C,
+        "psd_adjustment": psd_adjustment,
     }
 
 
@@ -307,7 +378,7 @@ def compute_attribution(
 
     w = np.asarray(weights, dtype=float)
     mu_0 = np.asarray(expected_returns, dtype=float)
-    mu_R = apply_outlook_tilts(mu_0, tickers, sectors)
+    mu_R = apply_outlook_tilts(mu_0, tickers, sectors, tilts=regime.get("tilts"))
     tilt_vec = mu_R - mu_0
     n = len(tickers)
 
