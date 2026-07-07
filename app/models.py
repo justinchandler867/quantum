@@ -132,6 +132,7 @@ class OptimizeResponse(BaseModel):
     return_model_used: str = "historical"       # "historical" or "black_litterman"
     n_days: int | None = None          # trading days behind the estimates (BL only)
     shrinkage_alpha: float | None = None  # Ledoit-Wolf shrinkage intensity (BL only)
+    caps_source: str | None = None     # "snapshot <asof>" when caps.json filled any equilibrium weight
 
 
 class StressTestRequest(BaseModel):
