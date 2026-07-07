@@ -750,12 +750,17 @@ function Discovery({profile,ports,onAdd}){
       e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:9}},
         e("div",null,
           e("div",{className:"card-title"},"GUIDED FUND DISCOVERY"),
-          e("div",{style:{fontSize:11,color:"#64748b",lineHeight:1.5}},"Ranked by ",e("span",{style:{color:"#a5b4fc",fontWeight:"bold"}},"Fit Score"),profile?" — "+profile.cat+" · "+profile.goal+" · "+profile.hor:" — complete ① PROFILE first")
+          e("div",{style:{fontSize:11,color:"#64748b",lineHeight:1.5}},e("b",{style:{color:"#a5b4fc"}},"Ranked by screen match — not a recommendation."),profile?" — "+profile.cat+" · "+profile.goal+" · "+profile.hor:" — complete ① PROFILE first"),
+          e("div",{style:{fontSize:11,color:"#64748b",lineHeight:1.5,marginTop:3}},"This ranking reflects how closely each name matches your profile's factor screen. Whether that screen adds value over random selection from the same universe is currently being tested out-of-sample; the interface will show the result either way.")
         ),
         e("div",{style:{display:"flex",gap:6,alignItems:"center",flexShrink:0}},
           e("button",{className:"btn btn-xs"+(showFactors?" btn-p":""),onClick:()=>setShowFactors(!showFactors),style:{fontSize:9}},showFactors?"Hide Factors ▲":"⚙ Factor Weights ▼"),
           [["70+ Strong","rgba(52,211,153,.1)","#34d399"],["45-69 OK","rgba(251,191,36,.08)","#fbbf24"],["<45 Poor","rgba(248,113,113,.08)","#f87171"]].map(([l,bg,col])=>e("span",{key:l,style:{fontSize:9,padding:"2px 7px",background:bg,color:col,borderRadius:7}},l))
         )
+      ),
+      profile?.goal==="Growth"&&e("div",{className:"warn-box",style:{marginTop:8,marginBottom:8}},
+        e("b",null,"What this screen selects on."),
+        " Growth screens here are momentum-weighted: they surface what has already gone up. The momentum premium is real, and it reverses violently in regime shifts — past momentum crashes took back years of gains in weeks. The more a name has run, the more of that risk it carries."
       ),
       !howOpen&&e("div",{onClick:()=>setHowOpen(true),style:{cursor:"pointer",fontSize:12,color:"#94a3b8",padding:"6px 0",display:"flex",alignItems:"center",gap:6,marginBottom:4}},
         e("span",{style:{fontSize:14}},"ℹ"),
@@ -850,7 +855,8 @@ function Discovery({profile,ports,onAdd}){
               pks.map(pn=>{const inP=ports[pn][a.id]!==undefined;return e("button",{key:pn,className:"btn btn-xs "+(inP?"btn-s":"btn-p"),onClick:ev=>{ev.stopPropagation();onAdd(pn,a.id);}},(inP?"✓":"+")+(" "+pn));})
             ))
           );
-        }))
+        })),
+        e("tfoot",null,e("tr",null,e("td",{colSpan:17,style:{padding:"8px 6px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Fit scores rate each security on its own — they don't know what you already hold. Two top-ranked names can be near-duplicates of each other or of your portfolio. Diversification happens in the optimizer, not in this list.")))
       )
     ),
     openTicker&&e(TickerChart,{ticker:openTicker,name:(ASSETS.find(x=>x.id===openTicker)||{}).n,onClose:()=>setOpenTicker(null)}),
@@ -1555,7 +1561,7 @@ function regimeResultBody(res,fmtPct,regimeLabel){
       )
     ),
     res.description&&e("div",{style:{fontSize:10,color:"#94a3b8",lineHeight:1.55,padding:"8px 10px",background:"rgba(99,102,241,.05)",border:"1px solid rgba(99,102,241,.15)",borderRadius:6,marginBottom:8}},res.description),
-    e("div",{style:{fontSize:10,color:"#a5b4fc",lineHeight:1.5,padding:"8px 10px",background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.2)",borderRadius:6,marginBottom:8,fontStyle:"italic"}},"A regime isn't a crash test — an outlook can favor your positioning."),
+    e("div",{style:{fontSize:10,color:"#a5b4fc",lineHeight:1.5,padding:"8px 10px",background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.2)",borderRadius:6,marginBottom:8,fontStyle:"italic"}},"A regime isn't a crash test — an outlook can favor your positioning. Green here means this scenario helps you, not that you're safe in all scenarios."),
     e("div",{style:{fontSize:9,color:"#475569",marginBottom:8,fontStyle:"italic",lineHeight:1.4}},"Max drawdown is a median across 1,000 simulated one-year paths — expected behavior, not guaranteed.")
   );
 }
@@ -1652,7 +1658,7 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
   const[viewConf,setViewConf]=useState(1.0);                 // conviction c: 0.5/1.0/3.0
   const[showModelInfo,setShowModelInfo]=useState(false);
   const[lastMeta,setLastMeta]=useState(null);                // last /api/optimize response meta
-  const CONVICTIONS=[["Low",0.5,"33%"],["Med",1.0,"50%"],["High",3.0,"75%"]];
+  const CONVICTIONS=[["Light",0.5,"33%"],["Half",1.0,"50%"],["Strong",3.0,"75%"]];
   const[stressResult,setStressResult]=useState(null);
   const[stressLoading,setStressLoading]=useState(false);
   const[stressError,setStressError]=useState(null);
@@ -1719,18 +1725,18 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
           returnModel==="bl"&&e("div",{style:{fontSize:10,color:"#64748b",marginTop:5,lineHeight:1.5}},"Market-implied equilibrium returns with Ledoit-Wolf shrinkage covariance.")
         ),
         e("div",{style:{display:"flex",alignItems:"center",gap:6,marginBottom:10,padding:"7px 10px",background:useOutlook?"rgba(99,102,241,.12)":"rgba(148,163,184,.05)",border:"1px solid "+(useOutlook?"rgba(99,102,241,.4)":"rgba(148,163,184,.15)"),borderRadius:8,transition:"background .15s,border-color .15s"}},
-          e("button",{onClick:()=>setUseOutlook(x=>!x),title:"Toggle 2026 Co-CIO Outlook tilts",style:{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",padding:0,flex:1,textAlign:"left",fontFamily:"inherit"}},
+          e("button",{onClick:()=>setUseOutlook(x=>!x),title:"Toggle 2026 Market Outlook tilts",style:{display:"flex",alignItems:"center",gap:8,background:"none",border:"none",cursor:"pointer",padding:0,flex:1,textAlign:"left",fontFamily:"inherit"}},
             e("span",{style:{display:"inline-block",width:26,height:14,borderRadius:7,background:useOutlook?"#6366f1":"#334155",position:"relative",transition:"background .15s",flexShrink:0}},
               e("span",{style:{position:"absolute",top:1,left:useOutlook?13:1,width:12,height:12,borderRadius:6,background:"#fff",transition:"left .15s"}})
             ),
-            e("span",{style:{fontSize:11,fontWeight:"bold",color:useOutlook?"#a5b4fc":"#94a3b8",letterSpacing:.3}},"2026 Co-CIO Outlook · ",useOutlook?"On":"Off")
+            e("span",{style:{fontSize:11,fontWeight:"bold",color:useOutlook?"#a5b4fc":"#94a3b8",letterSpacing:.3}},"2026 Market Outlook (Quantex interpretation) · ",useOutlook?"On":"Off")
           ),
           e("button",{onClick:()=>setShowOutlookInfo(true),title:"What is this?",style:{background:"none",border:"1px solid rgba(148,163,184,.3)",color:"#94a3b8",cursor:"pointer",fontSize:10,width:18,height:18,borderRadius:9,padding:0,lineHeight:1,fontFamily:"inherit",flexShrink:0}},"ⓘ")
         ),
-        // ── Conviction dial: only when BL + Outlook are both on ───────────
+        // ── Tilt strength dial: only when BL + Outlook are both on ───────
         returnModel==="bl"&&useOutlook&&e("div",{style:{marginBottom:10,padding:"7px 10px",background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.2)",borderRadius:8}},
           e("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5}},
-            e("span",{style:{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:.5}},"VIEW CONVICTION"),
+            e("span",{style:{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:.5}},"TILT STRENGTH"),
             e("span",{style:{fontSize:9,color:"#64748b"}},"tilt pass-through")
           ),
           e("div",{style:{display:"flex",gap:4}},
@@ -1740,11 +1746,12 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
                 border:"1px solid "+(viewConf===c?"rgba(99,102,241,.5)":"rgba(148,163,184,.18)"),
                 background:viewConf===c?"rgba(99,102,241,.2)":"transparent",color:viewConf===c?"#a5b4fc":"#94a3b8"}
             },e("div",null,lbl),e("div",{style:{fontSize:9,fontWeight:500,color:viewConf===c?"#818cf8":"#64748b",marginTop:1}},pt)))
-          )
+          ),
+          e("div",{style:{fontSize:9,color:"#64748b",lineHeight:1.4,marginTop:6}},"This dial sets how much of each tilt the optimizer applies (33% / 50% / 75%). It is your preference, not a measure of anyone's confidence.")
         ),
         optView==="picker"&&e(React.Fragment,null,
           e("div",{style:{fontSize:11,color:"#64748b",marginBottom:10,lineHeight:1.5}},"What do you want to optimize for?"),
-          useOutlook&&e("div",{style:{fontSize:10,color:"#a5b4fc",marginBottom:8,padding:"4px 8px",background:"rgba(99,102,241,.08)",borderRadius:4,letterSpacing:.3}},"◈ Strategy will run under 2026 Co-CIO Outlook"),
+          useOutlook&&e("div",{style:{fontSize:10,color:"#a5b4fc",marginBottom:8,padding:"4px 8px",background:"rgba(99,102,241,.08)",borderRadius:4,letterSpacing:.3}},"◈ Strategy will run under 2026 Market Outlook"),
           OPT_GOALS.map(g=>e("div",{
             key:g.id,
             className:"opt-goal-card"+(tickers.length<2?" disabled":""),
@@ -1758,13 +1765,13 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
         optView==="running"&&e("div",{style:{textAlign:"center",padding:"20px 0"}},
           e("div",{style:{fontSize:11,color:"#94a3b8",marginBottom:10}},"Optimizing for:"),
           e("div",{style:{fontSize:13,color:"#a5b4fc",fontWeight:"bold",marginBottom:6}},(OPT_GOALS.find(g=>g.id===lastGoal)||{}).title),
-          useOutlook&&e("div",{style:{fontSize:10,color:"#a5b4fc",marginBottom:10,letterSpacing:.3}},"under 2026 Co-CIO Outlook"),
+          useOutlook&&e("div",{style:{fontSize:10,color:"#a5b4fc",marginBottom:10,letterSpacing:.3}},"under 2026 Market Outlook"),
           e("div",{style:{fontSize:14,color:"#818cf8",marginTop:6}},e("span",{className:"spin"},"◌")," Working…")
         ),
         optView==="results"&&(()=>{const g=OPT_GOALS.find(x=>x.id===lastGoal)||{};const bl=lastMeta&&lastMeta.return_model_used==="black_litterman";return e(React.Fragment,null,
           lastMeta&&e("div",{style:{fontSize:10,color:bl?"#a5b4fc":"#94a3b8",marginBottom:6,padding:"4px 8px",background:bl?"rgba(99,102,241,.1)":"rgba(148,163,184,.06)",border:"1px solid "+(bl?"rgba(99,102,241,.3)":"rgba(148,163,184,.18)"),borderRadius:4,letterSpacing:.3,fontWeight:"bold"}},bl?"◇ Market equilibrium (Black-Litterman)":"◇ Historical averages"),
           bl&&lastMeta.n_days&&e("div",{style:{fontSize:10,color:"#64748b",marginBottom:6,fontStyle:"italic"}},"estimates from "+lastMeta.n_days+" trading days · shrinkage α="+Number(lastMeta.shrinkage_alpha).toFixed(2)),
-          lastOutlook&&e("div",{style:{fontSize:10,color:"#a5b4fc",marginBottom:6,padding:"4px 8px",background:"rgba(99,102,241,.1)",border:"1px solid rgba(99,102,241,.3)",borderRadius:4,letterSpacing:.3,fontWeight:"bold"}},"◈ Optimized under 2026 Co-CIO Outlook"+(bl?" · views @ "+(CONVICTIONS.find(c=>c[1]===viewConf)||["",0,""])[2]+" pass-through":"")),
+          lastOutlook&&e("div",{style:{fontSize:10,color:"#a5b4fc",marginBottom:6,padding:"4px 8px",background:"rgba(99,102,241,.1)",border:"1px solid rgba(99,102,241,.3)",borderRadius:4,letterSpacing:.3,fontWeight:"bold"}},"◈ Optimized under 2026 Market Outlook"+(bl?" · views @ "+(CONVICTIONS.find(c=>c[1]===viewConf)||["",0,""])[2]+" pass-through":"")),
           e("div",{style:{fontSize:10,color:"#64748b",marginBottom:3,letterSpacing:.3}},"OPTIMIZED FOR"),
           e("div",{style:{fontSize:13,fontWeight:"bold",color:"#a5b4fc",marginBottom:8}},g.title),
           e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.5,marginBottom:10}},g.result||""),
@@ -1780,7 +1787,7 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
             e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.6,marginBottom:12}},"Expected return = each asset's recent return, annualized. Simple, but a single price window can overweight one regime — a calm bull stretch or a single drawdown — and mean-variance optimization amplifies those estimation errors into extreme weights."),
             e("div",{style:{fontSize:11,fontWeight:700,color:"#cbd5e1",marginBottom:4}},"Market equilibrium (Black-Litterman)"),
             e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.6,marginBottom:10}},"Instead of trusting one return window, we ask: what expected returns would make today's market-cap weights optimal? That reverse-optimization gives the ",e("b",{style:{color:"#cbd5e1"}},"equilibrium prior")," π = δ·Σ·w_mkt — the market's own implied view. The covariance Σ is Ledoit-Wolf shrunk toward a constant-correlation target, which pulls noisy pairwise correlations toward their average and stabilizes the estimate."),
-            e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.6,marginBottom:10}},"When the ",e("b",{style:{color:"#cbd5e1"}},"2026 Co-CIO Outlook")," is on, each sector tilt becomes a ",e("b",{style:{color:"#cbd5e1"}},"view")," layered on top of the prior — not a blunt add-on. Your conviction sets how far the posterior moves from the market toward your view:"),
+            e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.6,marginBottom:10}},"When the ",e("b",{style:{color:"#cbd5e1"}},"2026 Market Outlook")," is on, each sector tilt becomes a ",e("b",{style:{color:"#cbd5e1"}},"view")," layered on top of the prior — not a blunt add-on. Your conviction sets how far the posterior moves from the market toward your view:"),
             e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11,marginBottom:12}},
               e("tbody",null,[["Low","c = 0.5","33% of the tilt"],["Med","c = 1.0","50% of the tilt"],["High","c = 3.0","75% of the tilt"]].map(r=>e("tr",{key:r[0],style:{borderBottom:"1px solid #1a2540"}},
                 e("td",{style:{padding:"6px 4px",color:"#cbd5e1",fontWeight:700}},r[0]),
@@ -1796,9 +1803,8 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
         showOutlookInfo&&e("div",{onClick:()=>setShowOutlookInfo(false),style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:1200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
           e("div",{onClick:ev=>ev.stopPropagation(),style:{background:"#0b0f1e",border:"1px solid rgba(99,102,241,.25)",borderRadius:12,maxWidth:500,width:"100%",padding:20,position:"relative"}},
             e("button",{onClick:()=>setShowOutlookInfo(false),title:"Close",style:{position:"absolute",top:8,right:10,background:"none",border:"none",color:"#94a3b8",fontSize:18,cursor:"pointer",padding:"2px 8px",lineHeight:1}},"✕"),
-            e("div",{style:{fontSize:14,fontWeight:700,color:"#a5b4fc",marginBottom:6,letterSpacing:.3}},"2026 Co-CIO Outlook"),
-            e("div",{style:{fontSize:10,color:"#64748b",marginBottom:14,fontStyle:"italic",lineHeight:1.4}},"Based on commentary from Fort Washington Co-CIOs Christopher Shipley & Brendan White, 2025-2026"),
-            e("div",{style:{fontSize:12,color:"#cbd5e1",lineHeight:1.65,marginBottom:14}},"Equity returns in 2026 should be driven by earnings growth rather than multiple expansion, with valuations arguably validated by improving earnings expectations. Stock-bond correlation is regime-shifting, requiring refreshed diversification assumptions. Selected sectors are tilted to reflect this view: overweights to Financial Services, Healthcare, Industrials, and Fixed Income; underweight to Technology to reflect mega-cap concentration risk."),
+            e("div",{style:{fontSize:14,fontWeight:700,color:"#a5b4fc",marginBottom:6,letterSpacing:.3}},"2026 Market Outlook — how Quantex encodes it"),
+            e("div",{style:{fontSize:12,color:"#cbd5e1",lineHeight:1.65,marginBottom:14}},"These tilts are Quantex's own directional interpretation of publicly published institutional commentary. The direction of each tilt follows the commentary; the magnitudes (e.g., +150bp) were chosen by Quantex as order-of-magnitude estimates — no source publishes these numbers. Treat them as a starting hypothesis to weigh, not a forecast to act on."),
             e("div",{style:{fontSize:10,fontWeight:700,color:"#94a3b8",letterSpacing:.5,marginBottom:6}},"SECTOR TILTS"),
             e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11,marginBottom:14}},
               e("tbody",null,OUTLOOK_TILTS.map(([sec,t])=>e("tr",{key:sec,style:{borderBottom:"1px solid #1a2540"}},
@@ -1806,13 +1812,13 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
                 e("td",{style:{padding:"6px 4px",textAlign:"right",fontWeight:"bold",fontFamily:"'JetBrains Mono',monospace",color:t.startsWith("+")?"#1D9E75":"#ef4444"}},t)
               )))
             ),
-            e("div",{style:{padding:"10px 12px",background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)",borderRadius:8,fontSize:10,color:"#fbbf24",lineHeight:1.55}},"These tilts reflect a synthesized interpretation of the cited commentary, not the firm's official portfolio. Educational use only.")
+            e("div",{style:{padding:"10px 12px",background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)",borderRadius:8,fontSize:10,color:"#fbbf24",lineHeight:1.55}},"These tilts are Quantex's own interpretation of published institutional commentary — directions inferred, magnitudes chosen by us. Not any firm's official view. Educational use only.")
           )
         )
       ),
       e("div",{className:"card"},
         e("div",{className:"card-title"},"REGIME STRESS TEST"),
-        e("div",{style:{fontSize:11,color:"#64748b",marginBottom:10,lineHeight:1.5}},"How would this portfolio behave under the 2026 Co-CIO Outlook regime?"),
+        e("div",{style:{fontSize:11,color:"#64748b",marginBottom:10,lineHeight:1.5}},"How would this portfolio behave under the 2026 Market Outlook regime?"),
         !stressLoading&&!stressResult&&e(React.Fragment,null,
           e("button",{className:"btn btn-p btn-full",disabled:tickers.length<2,onClick:runStress},"Run Stress Test"),
           tickers.length<2&&e("div",{style:{fontSize:10,color:"#475569",textAlign:"center",marginTop:6}},"Add at least 2 assets to run")
@@ -3156,10 +3162,9 @@ function LoginGate({children}){
               e("div",{className:"proof-caption"},"Four strategies in plain English. Pick what you actually want.")
             ),
             e("div",{className:"proof-block"},
-              e("div",{className:"proof-block-title"},"Our house view cites its sources."),
+              e("div",{className:"proof-block-title"},"Our outlook shows its math."),
               e("div",{className:"proof-visual"},
-                e("div",{style:{fontSize:12,fontWeight:700,color:"#a5b4fc",marginBottom:4,letterSpacing:.3}},"2026 Co-CIO Outlook"),
-                e("div",{style:{fontSize:8,color:"#64748b",marginBottom:10,fontStyle:"italic",lineHeight:1.4}},"Based on commentary from Fort Washington Co-CIOs Christopher Shipley & Brendan White, 2025-2026"),
+                e("div",{style:{fontSize:12,fontWeight:700,color:"#a5b4fc",marginBottom:4,letterSpacing:.3}},"2026 Market Outlook"),
                 e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:10}},
                   e("tbody",null,[["Financial Services","+1.5%"],["Healthcare","+1.0%"],["Technology","-1.0%"]].map(([sec,t])=>
                     e("tr",{key:sec,style:{borderBottom:"1px solid #1a2540"}},
@@ -3168,7 +3173,7 @@ function LoginGate({children}){
                     )))
                 )
               ),
-              e("div",{className:"proof-caption"},"Every assumption visible, every tilt sourced, every stress test decomposed into its causes.")
+              e("div",{className:"proof-caption"},"Every assumption visible, every tilt magnitude disclosed as ours, every stress test decomposed into its causes.")
             )
           ),
           e("div",{className:"proof-strip"},"Before any user touched this product, it was run through an ",e("b",null,"18-gate shakedown against sealed predictions"),". Six findings. All fixed and regression-tested. That's what showing your work means.")
@@ -3699,7 +3704,7 @@ function App({user,logout}){
       e("div",{className:"mkt"},Object.entries(MKT).map(([k,v])=>e("div",{key:k,className:"mkt-item"},e("div",{className:"mkt-lbl"},k),e("div",{className:"mkt-val "+(v.ch>=0?"up":"dn")},v.p)))),
       profile?e("div",{style:{display:"flex",alignItems:"center",gap:6}},e("div",{className:"chip",onClick:()=>setTab("onboard"),title:"Update profile"},profile.score+"/100 · "+profile.cat+" · "+profile.goal+" ✎"),e("button",{className:"btn btn-xs",onClick:resetAll,title:"Reset all data",style:{color:"#475569",fontSize:9}},"↺ RESET"),user&&user.name!=="Guest"&&e("span",{style:{fontSize:10,color:"#64748b"}},user.name),logout&&e("button",{className:"btn btn-xs",onClick:logout,style:{color:"#475569",fontSize:9}},"Sign Out")):e("div",{style:{display:"flex",alignItems:"center",gap:6}},e("div",{className:"chip",style:{cursor:"default"}},"Complete ① PROFILE to unlock"),user&&user.name!=="Guest"&&e("span",{style:{fontSize:10,color:"#64748b"}},user.name),logout&&e("button",{className:"btn btn-xs",onClick:logout,style:{color:"#475569",fontSize:9}},"Sign Out"))
     ),
-    screening&&e("div",{style:{padding:"8px 16px",background:"#0d1228",borderBottom:"1px solid #1a2540",fontSize:11,color:"#818cf8"}},e("span",{className:"spin"},"◌")," Screening Nasdaq universe — this may take 30-60s on first load..."),
+    screening&&e("div",{style:{padding:"8px 16px",background:"#0d1228",borderBottom:"1px solid #1a2540",fontSize:11,color:"#818cf8"}},e("span",{className:"spin"},"◌")," Screening ~600 securities (S&P 500 + major ETFs + a curated extended list) — this may take 30-60s on first load..."),
     as&&e("div",{className:"sbar"},
       e("div",{className:"sb-item",style:{borderRight:"1px solid #1a2540"}},e("div",{className:"sb-lbl"},"PORT "+ap),e("div",{className:"sb-val",style:{color:"#818cf8",fontSize:11}},Object.keys(aw).length+" pos.")),
       [["RETURN",(as.ret>0?"+":"")+as.ret+"%",as.ret>=0?"up":"dn"],["VOL σ",as.vol+"%",""],["SHARPE",as.sh,as.sh>=1?"up":as.sh>=.5?"wa":"dn"],["BETA",as.beta,""],["SORTINO",as.so,""],["VAR 95%",as.var95+"%","dn"],["DIV YIELD",as.divY+"%",""]].map(([l,v,cls])=>e("div",{key:l,className:"sb-item"},e("div",{className:"sb-lbl"},l),e("div",{className:"sb-val "+cls},v)))

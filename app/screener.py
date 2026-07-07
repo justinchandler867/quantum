@@ -1,7 +1,9 @@
 """
 Screening Pipeline
-Takes the full Nasdaq universe through four stages:
-  1. Universe load (all Nasdaq-listed tickers)
+Takes the screened universe (~600 securities: S&P 500 + major ETFs + a
+curated extended list, loaded from app/data/universe.json) through four
+stages:
+  1. Universe load (tickers from app/data/universe.json)
   2. Hard gates (market cap, volume, price, data availability)
   3. Factor scoring (momentum, quality, value, low-vol, yield)
   4. Profile-aware fit scoring (goal-weighted factor composite)
@@ -126,13 +128,12 @@ class ScreeningResult:
 
 def load_nasdaq_tickers() -> list[str]:
     """
-    Load all Nasdaq-listed tickers.
+    Load the screening universe's ticker list.
 
-    Primary: fetch from yfinance's screener.
-    Fallback: use a curated list of Nasdaq-100 + extended tickers.
-
-    In production, replace with a daily-refreshed file from
-    Nasdaq's FTP (ftp://ftp.nasdaqtrader.com/SymbolDirectory/).
+    Primary: fetch from yfinance's screener (QQQ holdings).
+    Fallback: the curated ~600-security universe from
+    app/data/universe.json (S&P 500 + major ETFs + a curated extended
+    list) — see _load_universe() / _FALLBACK_TICKERS below.
     """
     # Attempt to get tickers programmatically
     try:
