@@ -146,11 +146,12 @@ def audit_F():
         available = [t for t in G10 if t in returns.columns]
         window = returns[available].dropna().tail(5 * 252)
         sigma, alpha, ndays = ledoit_wolf_constant_correlation(window.values)
-        caps, note = _get_market_caps(available)
+        caps, note, caps_source = _get_market_caps(available)
         w_mkt = caps / caps.sum()
         sigw = sigma @ w_mkt
         pi = equilibrium_prior(sigma, caps, delta=2.5)
-        print(f"F1  local: n_days={ndays}  alpha={alpha:.6f}  caps_note={note}")
+        print(f"F1  local: n_days={ndays}  alpha={alpha:.6f}  "
+              f"caps_note={note}  caps_source={caps_source}")
         print(f"    {'ticker':<6}{'w_mkt':>12}{'(Sigma*w)_i':>14}{'pi_i':>14}")
         for i, t in enumerate(available):
             print(f"    {t:<6}{w_mkt[i]:>12.6f}{sigw[i]:>14.8f}{pi[i]:>14.8f}")
@@ -175,6 +176,7 @@ def audit_F():
               f"n_days={data.get('n_days')}  shrinkage_alpha={data.get('shrinkage_alpha')}")
         print(f"    weights={data.get('weights')}")
         print(f"    constraints_note={data.get('constraints_note')}")
+        print(f"    caps_source={data.get('caps_source')}")
     except Exception as exc:
         print(f"F1  server round-trip skipped ({base}): {exc}")
 
