@@ -96,12 +96,4 @@ FUNDAMENTAL_CACHE_TTL = 60 * 60 * 24 * 7  # 7 days — fundamentals change slowl
 # PESTEL & Porter's are sector-level, cached per GICS sector
 SECTOR_ANALYSIS_REFRESH_DAYS = 90  # quarterly refresh
 
-# Conviction score weights
-CONVICTION_WEIGHTS = {
-    "financials": 0.30,        # revenue growth, margins, FCF, ROIC, debt
-    "competitive_position": 0.25,  # moat, market share, Porter's forces
-    "growth_trajectory": 0.20,     # forward estimates, TAM, catalysts
-    "risk_factors": 0.15,          # concentration, regulatory, macro
-    "valuation": 0.10,             # DCF margin of safety
-}
 

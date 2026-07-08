@@ -1652,7 +1652,7 @@ async def screen_universe(req: ScreenRequest):
 
 # ── Fundamental Analysis Endpoints ───────────────────────────────────────────
 
-from app.fundamental import analyze_company, analyze_batch, analyze_sector, generate_fallback_analysis
+from app.fundamental import analyze_company, analyze_batch, analyze_sector
 
 
 @app.post("/api/analyze", response_model=CompanyAnalysisResponse)
@@ -1665,7 +1665,7 @@ async def analyze_single(req: AnalyzeSingleRequest):
       Step 0: Fetch financial data from yfinance
       Step 1: Claude analyzes financials → structured metrics
       Step 2: Claude performs SWOT + competitive assessment
-      Step 3: Claude synthesizes → conviction score + recommendation
+      Step 3: Claude synthesizes → factual, source-tied description (no recommendation)
 
     Sector-level PESTEL and Porter's Five Forces are computed once per sector
     and cached for 90 days.
@@ -1684,11 +1684,8 @@ async def analyze_single(req: AnalyzeSingleRequest):
         financial_strengths=result.financial_strengths,
         financial_weaknesses=result.financial_weaknesses,
         swot=result.swot, competitive_position=result.competitive_position,
-        moat_assessment=result.moat_assessment,
-        conviction_score=result.conviction_score,
-        conviction_reasoning=result.conviction_reasoning,
+        synthesis=result.synthesis,
         key_catalysts=result.key_catalysts, key_risks=result.key_risks,
-        recommendation=result.recommendation,
         price_target_rationale=result.price_target_rationale,
         analysis_source=result.analysis_source,
     )
@@ -1699,7 +1696,7 @@ async def analyze_multiple(req: AnalyzeRequest):
     """
     Run fundamental analysis on multiple tickers (up to 20).
     Processes sequentially to respect API rate limits.
-    Returns sorted by conviction score descending.
+    Returns sorted by ticker.
     """
     try:
         results = await analyze_batch(
@@ -1716,25 +1713,18 @@ async def analyze_multiple(req: AnalyzeRequest):
             financial_strengths=r.financial_strengths,
             financial_weaknesses=r.financial_weaknesses,
             swot=r.swot, competitive_position=r.competitive_position,
-            moat_assessment=r.moat_assessment,
-            conviction_score=r.conviction_score,
-            conviction_reasoning=r.conviction_reasoning,
+            synthesis=r.synthesis,
             key_catalysts=r.key_catalysts, key_risks=r.key_risks,
-            recommendation=r.recommendation,
             price_target_rationale=r.price_target_rationale,
             analysis_source=r.analysis_source,
         )
         for r in results
     ]
 
-    scores = [a.conviction_score for a in analyses if a.analysis_source != "error"]
-    avg = sum(scores) / max(len(scores), 1)
-
     return BatchAnalysisResponse(
         analyses=analyses,
         total_requested=len(req.tickers),
         total_completed=len([a for a in analyses if a.analysis_source != "error"]),
-        avg_conviction=round(avg, 1),
     )
 
 

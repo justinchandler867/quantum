@@ -380,12 +380,9 @@ class CompanyAnalysisResponse(BaseModel):
     financial_weaknesses: list[str]
     swot: SWOTResponse | dict
     competitive_position: str
-    moat_assessment: str
-    conviction_score: int
-    conviction_reasoning: str
+    synthesis: str
     key_catalysts: list[str]
     key_risks: list[str]
-    recommendation: str
     price_target_rationale: str
     analysis_source: str
 
@@ -394,7 +391,6 @@ class BatchAnalysisResponse(BaseModel):
     analyses: list[CompanyAnalysisResponse]
     total_requested: int
     total_completed: int
-    avg_conviction: float
 
 
 class SectorAnalysisResponse(BaseModel):

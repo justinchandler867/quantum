@@ -4,7 +4,7 @@ Claude-powered pipeline that takes screened candidates and produces:
   1. Financial statement analysis (revenue, margins, FCF, ROIC, debt)
   2. Qualitative assessment (SWOT, competitive position)
   3. Sector-level context (PESTEL, Porter's Five Forces)
-  4. Synthesis with conviction score (0-100)
+  4. Factual synthesis — source-tied description, no rating or recommendation
 
 Each step produces structured JSON that feeds the next.
 Sector analyses are cached quarterly. Company analyses cached 7 days.
@@ -21,7 +21,6 @@ import yfinance as yf
 from app.config import (
     CLAUDE_MODEL,
     CLAUDE_MAX_TOKENS,
-    CONVICTION_WEIGHTS,
 )
 from app.cache import cache_key, cache_get, cache_set
 
@@ -100,14 +99,11 @@ class CompanyAnalysis:
     # Qualitative analysis (Step 2)
     swot: dict = field(default_factory=dict)  # {strengths, weaknesses, opportunities, threats}
     competitive_position: str = ""
-    moat_assessment: str = ""
 
     # Synthesis (Step 3)
-    conviction_score: int = 50
-    conviction_reasoning: str = ""
+    synthesis: str = ""
     key_catalysts: list[str] = field(default_factory=list)
     key_risks: list[str] = field(default_factory=list)
-    recommendation: str = "Hold"  # Strong Buy / Buy / Hold / Sell
     price_target_rationale: str = ""
 
     # Metadata
@@ -302,8 +298,7 @@ Be specific — reference actual numbers."""
   "revenue_quality": "high/medium/low with reasoning",
   "balance_sheet_health": "strong/adequate/weak with reasoning",
   "cash_flow_quality": "strong/adequate/weak with reasoning",
-  "valuation_assessment": "undervalued/fairly valued/overvalued with reasoning",
-  "financial_score": 0-100
+  "valuation_context": "factual description of the multiples relative to growth and, where given, to sector norms — state the numbers, do NOT judge whether the stock is cheap, undervalued, or overvalued"
 }}
 
 {_format_profile_for_prompt(profile)}"""
@@ -327,9 +322,11 @@ async def analyze_qualitative(
     if sector_context:
         sector_info = f"\nSECTOR CONTEXT:\n{json.dumps(sector_context, indent=2)[:800]}"
 
-    system = """You are a strategy consultant performing competitive analysis.
-Use the financial data, business description, and sector context to assess 
-the company's competitive position using SWOT analysis and moat assessment."""
+    system = """You are a strategy analyst describing a company's competitive characteristics from the data.
+Use the financial data, business description, and sector context to describe — factually — the competitive
+position (segments, scale, customer/supplier dynamics, named competitors) and a SWOT of what the inputs
+disclose. Do NOT rate, grade, or characterize the strength or width of any moat, and do NOT judge whether
+the position is strong or weak — describe the characteristics, not a verdict on them."""
 
     prompt = f"""Analyze this company and return JSON:
 {{
@@ -339,10 +336,7 @@ the company's competitive position using SWOT analysis and moat assessment."""
     "opportunities": ["opportunity 1", ...],
     "threats": ["threat 1", ...]
   }},
-  "competitive_position": "1-2 sentence assessment of market position",
-  "moat_assessment": "none/narrow/wide — with reasoning",
-  "moat_sources": ["source 1", ...],
-  "competitive_score": 0-100
+  "competitive_position": "factual prose describing the competitive characteristics the data actually shows (segments, scale, customer/supplier dynamics, named competitors); describe, do NOT rate or grade the strength or width of any moat"
 }}
 
 COMPANY DATA:
@@ -355,9 +349,9 @@ FINANCIAL ANALYSIS:
     return await _call_claude_json(system, prompt, api_key)
 
 
-# ── Step 3: Synthesis — Conviction Score ─────────────────────────────────────
+# ── Step 3: Synthesis — Factual Description ──────────────────────────────────
 
-async def synthesize_conviction(
+async def synthesize_summary(
     profile: FinancialProfile,
     financial_analysis: dict,
     qualitative_analysis: dict,
@@ -367,34 +361,39 @@ async def synthesize_conviction(
     api_key: str,
 ) -> dict:
     """
-    Step 3: Final synthesis combining all inputs into a conviction score.
-    Accounts for investor profile (risk tolerance, goal).
+    Step 3: Final factual synthesis combining all inputs into a source-tied
+    description. Emits no rating, score, or recommendation.
     """
-    system = f"""You are a senior portfolio manager making a final investment decision.
-The investor's profile: risk score {risk_score}/100, goal is {goal}.
-Synthesize ALL inputs into a final conviction score and recommendation.
-Weight your analysis: financials 30%, competitive position 25%, growth trajectory 20%, 
-risk factors 15%, valuation 10%."""
+    system = f"""You are a CFA-level analyst producing a FACTUAL synthesis of a company from the data provided.
+Describe the business, its segments, and its financial trends, and tie every statement to the specific
+input it rests on — a named metric, the business description, or the sector context.
+
+Hard constraints (non-negotiable):
+- Do NOT recommend, rate, or characterize the investment's attractiveness. No buy / sell / hold framing,
+  no "undervalued" / "overvalued", no advice on whether or how much to own.
+- Do NOT forecast a price or assert a target of your own. The analyst target and analyst rating below are
+  third-party facts you may cite AS third-party facts, and nothing more.
+- If a piece of requested information is not present in the inputs, state that it is unavailable rather than
+  inferring it or filling the gap from general knowledge.
+Report what the data shows, not what to do about it."""
 
     sector_info = ""
     if sector_context:
         sector_info = f"\nSECTOR CONTEXT:\n{json.dumps(sector_context, indent=2)[:600]}"
 
-    prompt = f"""Synthesize and return JSON:
+    prompt = f"""Synthesize the inputs into FACTUAL JSON. Every string must describe what the data shows,
+tied to its source, with no recommendation and no attractiveness judgment:
 {{
-  "conviction_score": 0-100,
-  "recommendation": "Strong Buy / Buy / Hold / Reduce / Sell",
-  "conviction_reasoning": "3-4 sentence thesis",
-  "key_catalysts": ["catalyst 1", "catalyst 2", ...],
-  "key_risks": ["risk 1", "risk 2", ...],
-  "price_target_rationale": "1-2 sentence target reasoning",
-  "position_sizing_note": "suggested position size context given investor profile",
-  "time_horizon": "short/medium/long with reasoning"
+  "synthesis": "3-4 sentence factual synthesis of the business, its segments, and its financial trends; tie each claim to its data source",
+  "key_catalysts": ["factual, already-disclosed developments in the inputs — not predictions"],
+  "key_risks": ["factual risk factors disclosed in the inputs"],
+  "price_target_rationale": "state the third-party analyst target as a labeled fact plus factual valuation context; assert NO target of your own; write 'Not available' if no analyst target is present",
+  "data_gaps": ["any requested information not present in the inputs"]
 }}
 
 COMPANY: {profile.name} ({profile.ticker})
 Price: ${profile.price:.2f} | Market Cap: ${profile.market_cap:,.0f}
-Analyst Target: ${profile.target_price or 0:.2f} | Recommendation: {profile.analyst_recommendation or "N/A"}
+Third-party analyst target (fact): ${profile.target_price or 0:.2f} | Third-party analyst rating (fact): {profile.analyst_recommendation or "N/A"}
 
 FINANCIAL ANALYSIS:
 {json.dumps(financial_analysis, indent=2)[:500]}
@@ -478,7 +477,7 @@ async def analyze_company(
     Step 0: Fetch financial data from yfinance
     Step 1: Claude analyzes financials → structured metrics
     Step 2: Claude performs SWOT + competitive assessment
-    Step 3: Claude synthesizes → conviction score + recommendation
+    Step 3: Claude synthesizes → factual, source-tied description (no recommendation)
     """
     # Check cache
     ck = cache_key("fund", [ticker], risk=risk_score, goal=goal)
@@ -496,7 +495,7 @@ async def analyze_company(
         logger.error(f"Failed to fetch data for {ticker}: {e}")
         return CompanyAnalysis(
             ticker=ticker, name=ticker, sector="Unknown",
-            conviction_reasoning=f"Unable to fetch financial data: {e}",
+            synthesis=f"Unable to fetch financial data: {e}",
             analysis_source="error",
         )
 
@@ -518,7 +517,7 @@ async def analyze_company(
         fin = await analyze_financials(profile, api_key)
     except Exception as e:
         logger.error(f"Financial analysis failed for {ticker}: {e}")
-        fin = {"summary": f"Analysis unavailable: {e}", "financial_score": 50,
+        fin = {"summary": f"Analysis unavailable: {e}",
                "strengths": [], "weaknesses": []}
 
     # Step 2: Qualitative analysis
@@ -526,18 +525,16 @@ async def analyze_company(
         qual = await analyze_qualitative(profile, fin, sector_context, api_key)
     except Exception as e:
         logger.error(f"Qualitative analysis failed for {ticker}: {e}")
-        qual = {"swot": {}, "competitive_position": f"Analysis unavailable: {e}",
-                "moat_assessment": "unknown", "competitive_score": 50}
+        qual = {"swot": {}, "competitive_position": f"Analysis unavailable: {e}"}
 
     # Step 3: Synthesis
     try:
-        synth = await synthesize_conviction(
+        synth = await synthesize_summary(
             profile, fin, qual, sector_context, risk_score, goal, api_key,
         )
     except Exception as e:
         logger.error(f"Synthesis failed for {ticker}: {e}")
-        synth = {"conviction_score": 50, "recommendation": "Hold",
-                 "conviction_reasoning": f"Synthesis unavailable: {e}",
+        synth = {"synthesis": f"Synthesis unavailable: {e}",
                  "key_catalysts": [], "key_risks": []}
 
     result = CompanyAnalysis(
@@ -549,12 +546,9 @@ async def analyze_company(
         financial_weaknesses=fin.get("weaknesses", []),
         swot=qual.get("swot", {}),
         competitive_position=qual.get("competitive_position", ""),
-        moat_assessment=qual.get("moat_assessment", ""),
-        conviction_score=min(100, max(0, int(synth.get("conviction_score", 50)))),
-        conviction_reasoning=synth.get("conviction_reasoning", ""),
+        synthesis=synth.get("synthesis", ""),
         key_catalysts=synth.get("key_catalysts", []),
         key_risks=synth.get("key_risks", []),
-        recommendation=synth.get("recommendation", "Hold"),
         price_target_rationale=synth.get("price_target_rationale", ""),
         analysis_source="claude",
     )
@@ -563,8 +557,7 @@ async def analyze_company(
     from app.config import FUNDAMENTAL_CACHE_TTL
     cache_set(ck, result.__dict__, FUNDAMENTAL_CACHE_TTL)
 
-    logger.info(f"Analysis complete for {ticker}: conviction={result.conviction_score}, "
-                f"rec={result.recommendation}")
+    logger.info(f"Analysis complete for {ticker}")
     return result
 
 
@@ -577,7 +570,7 @@ async def analyze_batch(
     """
     Run fundamental analysis on a batch of tickers.
     Processes sequentially to respect API rate limits.
-    Returns list of CompanyAnalysis sorted by conviction score.
+    Returns list of CompanyAnalysis sorted by ticker.
     """
     results = []
     for i, ticker in enumerate(tickers):
@@ -589,51 +582,10 @@ async def analyze_batch(
             logger.error(f"Failed to analyze {ticker}: {e}")
             results.append(CompanyAnalysis(
                 ticker=ticker, name=ticker, sector="Unknown",
-                conviction_reasoning=f"Analysis failed: {e}",
+                synthesis=f"Analysis failed: {e}",
                 analysis_source="error",
             ))
 
-    # Sort by conviction score descending
-    results.sort(key=lambda x: x.conviction_score, reverse=True)
+    # Sort by ticker (no rating to rank by)
+    results.sort(key=lambda x: x.ticker)
     return results
-
-
-def generate_fallback_analysis(ticker: str, screened_data: dict) -> CompanyAnalysis:
-    """
-    Generate a basic analysis without Claude API (for when no API key is available).
-    Uses quantitative data from the screener to produce a simplified assessment.
-    """
-    sh = screened_data.get("sharpe", 0)
-    beta = screened_data.get("beta", 1)
-    ret = screened_data.get("return_1y", 0)
-    vol = screened_data.get("volatility", 20)
-    fit = screened_data.get("fit_score", 50)
-
-    # Simple scoring based on available quantitative data
-    score = fit  # start with fit score
-    if sh > 1.5: score = min(100, score + 10)
-    elif sh > 1.0: score = min(100, score + 5)
-
-    rec = "Strong Buy" if score >= 80 else "Buy" if score >= 65 else "Hold" if score >= 45 else "Sell"
-
-    strengths = []
-    weaknesses = []
-    if sh > 1.0: strengths.append(f"Strong risk-adjusted returns (Sharpe {sh:.2f})")
-    if ret > 20: strengths.append(f"Strong momentum ({ret:.1f}% 1Y return)")
-    if beta < 0.8: strengths.append(f"Lower market sensitivity (β {beta:.2f})")
-    if vol > 40: weaknesses.append(f"High volatility ({vol:.1f}%)")
-    if beta > 1.5: weaknesses.append(f"High beta ({beta:.2f}) — amplifies market moves")
-    if sh < 0.5: weaknesses.append(f"Weak risk-adjusted returns (Sharpe {sh:.2f})")
-
-    return CompanyAnalysis(
-        ticker=ticker,
-        name=screened_data.get("name", ticker),
-        sector=screened_data.get("sector", "Unknown"),
-        financial_summary=f"Quantitative profile: {ret:.1f}% 1Y return, {vol:.1f}% vol, {sh:.2f} Sharpe, {beta:.2f} beta.",
-        financial_strengths=strengths,
-        financial_weaknesses=weaknesses,
-        conviction_score=score,
-        conviction_reasoning=f"Score based on quantitative screening: fit score {fit}/100, Sharpe {sh:.2f}. Full fundamental analysis requires an API key.",
-        recommendation=rec,
-        analysis_source="fallback",
-    )
