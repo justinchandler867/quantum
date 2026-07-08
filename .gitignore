@@ -13,3 +13,6 @@ venv/
 
 # Local env
 .env
+
+# Backtest cached price/dividend history (large, re-fetchable via backtest/fetch_data.py)
+backtest/data/
