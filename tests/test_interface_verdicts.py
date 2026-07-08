@@ -88,7 +88,7 @@ EXPECTED_CHIPS = [
     "Walk me through my portfolio's key metrics",
     "Explain my Sharpe ratio",
     "How does hedging work for a portfolio like this?",
-    "How does the Fit Score rank assets for my profile?",
+    "How does screen match rank assets for my profile?",
     "What does rebalancing do, and what are its tradeoffs?",
 ]
 RETIRED_CHIPS = [

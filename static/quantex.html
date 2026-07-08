@@ -729,8 +729,11 @@ function Onboard({onDone,current}){
 function Discovery({profile,ports,onAdd}){
   const[tf,setTf]=useState("All");
   const[search,setSearch]=useState("");
-  const[sk,setSk]=useState("fit");
-  const[sd,setSd]=useState(-1);
+  // Balanced goal: ranked presentation removed per VALIDATION verdict (DECORATION)
+  // — default to alphabetical (by ticker), factor data still visible.
+  const balancedUnranked=profile?.goal==="Balanced";
+  const[sk,setSk]=useState(balancedUnranked?"id":"fit");
+  const[sd,setSd]=useState(balancedUnranked?1:-1);
   const[openTicker,setOpenTicker]=useState(null);
   const[searchResults,setSearchResults]=useState(null);
   const[searchLoading,setSearchLoading]=useState(false);
@@ -860,7 +863,7 @@ function Discovery({profile,ports,onAdd}){
       fit=Math.max(0,Math.min(100,Math.round(customScore*20+60)));
     }
     return{...a,fit};
-  }).filter(a=>(tf==="All"||a.t===tf||a.sec===tf)&&(!search||a.id.toLowerCase().includes(search.toLowerCase())||a.n.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>sd*(b[sk]||0)-sd*(a[sk]||0));
+  }).filter(a=>(tf==="All"||a.t===tf||a.sec===tf)&&(!search||a.id.toLowerCase().includes(search.toLowerCase())||a.n.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>{const av=a[sk],bv=b[sk];if(typeof av==="string"||typeof bv==="string")return sd*String(av==null?"":av).localeCompare(String(bv==null?"":bv));return sd*(bv||0)-sd*(av||0);});
   const hs=k=>{if(sk===k)setSd(d=>-d);else{setSk(k);setSd(-1);}};
   const TH=(f,l,tip)=>e("th",{onClick:()=>hs(f),title:tip||undefined},l+(sk===f?(sd===-1?"↓":"↑"):"↕"));
   const pks=Object.keys(ports);
@@ -869,13 +872,17 @@ function Discovery({profile,ports,onAdd}){
       e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:9}},
         e("div",null,
           e("div",{className:"card-title"},"GUIDED FUND DISCOVERY"),
-          e("div",{style:{fontSize:11,color:"#64748b",lineHeight:1.5}},e("b",{style:{color:"#a5b4fc"}},"Ranked by screen match — not a recommendation."),profile?" — "+profile.cat+" · "+profile.goal+" · "+profile.hor:" — complete ① PROFILE first"),
+          e("div",{style:{fontSize:11,color:"#64748b",lineHeight:1.5}},e("b",{style:{color:"#a5b4fc"}},balancedUnranked?"Shown unranked — screen match added no edge for this profile.":"Ranked by screen match — not a recommendation."),profile?" — "+profile.cat+" · "+profile.goal+" · "+profile.hor:" — complete ① PROFILE first"),
           e("div",{style:{fontSize:11,color:"#64748b",lineHeight:1.5,marginTop:3}},"This ranking reflects how closely each name matches your profile's factor screen. Whether that screen adds value over random selection from the same universe is currently being tested out-of-sample; the interface will show the result either way.")
         ),
         e("div",{style:{display:"flex",gap:6,alignItems:"center",flexShrink:0}},
           e("button",{className:"btn btn-xs"+(showFactors?" btn-p":""),onClick:()=>setShowFactors(!showFactors),style:{fontSize:9}},showFactors?"Hide Factors ▲":"⚙ Factor Weights ▼"),
-          [["70+ Strong","rgba(52,211,153,.1)","#34d399"],["45-69 OK","rgba(251,191,36,.08)","#fbbf24"],["<45 Poor","rgba(248,113,113,.08)","#f87171"]].map(([l,bg,col])=>e("span",{key:l,style:{fontSize:9,padding:"2px 7px",background:bg,color:col,borderRadius:7}},l))
+          [["70+ close match","rgba(52,211,153,.1)","#34d399"],["45-69 partial match","rgba(251,191,36,.08)","#fbbf24"],["<45 weak match","rgba(248,113,113,.08)","#f87171"]].map(([l,bg,col])=>e("span",{key:l,style:{fontSize:9,padding:"2px 7px",background:bg,color:col,borderRadius:7}},l))
         )
+      ),
+      balancedUnranked&&e("div",{className:"warn-box",style:{marginTop:8,marginBottom:8}},
+        e("b",null,"Ranking removed for Balanced profiles."),
+        " We walk-forward tested this screen against 1,000 random portfolios (2016–2025). For the Balanced profile its top names were no better than random on risk-adjusted return, so we don't present them as ranked — the list is shown alphabetically with all factor data visible. Sort any column yourself to explore. Full method and results in the Learn tab."
       ),
       profile?.goal==="Growth"&&e("div",{className:"warn-box",style:{marginTop:8,marginBottom:8}},
         e("b",null,"What this screen selects on."),
@@ -893,9 +900,9 @@ function Discovery({profile,ports,onAdd}){
           e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.5}},"Starting from major US large-cap stocks and widely-held ETFs. Filtered for liquidity and data completeness.")
         ),
         e("div",{style:{marginBottom:10}},
-          e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:4,letterSpacing:.3}},"How fit scores are calculated"),
-          e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.5}},"Each asset is scored against your profile on factor alignment (momentum, quality, value, low volatility, yield), risk band match, and horizon compatibility. Higher fit = better match for your specific profile."),
-          e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.5,marginTop:6}},"Fit scores are relative to the screened universe — a score compares a name to its peers, not to an absolute standard.")
+          e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:4,letterSpacing:.3}},"How screen match is calculated"),
+          e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.5}},"Each asset is scored against your profile on factor alignment (momentum, quality, value, low volatility, yield), risk band match, and horizon compatibility. A higher score means the name more closely matches your profile's screen — it is not a recommendation, and our own walk-forward test found the ranking is no better than random for some profiles (see the Learn tab)."),
+          e("div",{style:{fontSize:12,color:"#94a3b8",lineHeight:1.5,marginTop:6}},"Screen match is relative to the screened universe — it compares a name to its peers, not to an absolute standard.")
         ),
         e("div",null,
           e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:4,letterSpacing:.3}},"How to adjust"),
@@ -947,7 +954,7 @@ function Discovery({profile,ports,onAdd}){
     e("div",{className:"tbl-wrap"},
       e("table",{className:"dtbl"},
         e("thead",null,e("tr",null,
-          TH("fit","FIT"),TH("id","TICKER"),e("th",null,"NAME"),e("th",null,"TYPE"),
+          TH("fit","SCREEN MATCH"),TH("id","TICKER"),e("th",null,"NAME"),e("th",null,"TYPE"),
           TH("pctOff52wk","% OFF 52-WK HIGH","How far below its 52-week high this trades. Near 0% = extended; deep negative = fallen. Neither is automatically good."),
           TH("ret","1Y","Total return over each period. One good year is not a track record — compare across horizons."),
           TH("ret3y","3Y","Total return over each period. One good year is not a track record — compare across horizons."),
@@ -1020,7 +1027,7 @@ function Discovery({profile,ports,onAdd}){
           );
         })),
         e("tfoot",null,
-          e("tr",null,e("td",{colSpan:corrSel?22:21,style:{padding:"8px 6px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Fit scores rate each security on its own — they don't know what you already hold. Two top-ranked names can be near-duplicates of each other or of your portfolio. Diversification happens in the optimizer, not in this list.")),
+          e("tr",null,e("td",{colSpan:corrSel?22:21,style:{padding:"8px 6px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Screen match rates each security on its own — it doesn't know what you already hold. Two top-ranked names can be near-duplicates of each other or of your portfolio. Diversification happens in the optimizer, not in this list.")),
           e("tr",null,e("td",{colSpan:corrSel?22:21,style:{padding:"0 6px 8px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Sharpe (1Y): past-year return above the risk-free rate, per unit of volatility. The label compares each name's Sharpe to SPY's over the same window (cash = the risk-free rate). Historical, not a forecast or recommendation.")),
           corrSel&&e("tr",null,e("td",{colSpan:22,style:{padding:"0 6px 8px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Correlation of daily returns with the selected portfolio, in calm and stressed markets. Historical co-movement — not a forecast.")))
       )
@@ -2019,7 +2026,7 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
           e("div",{className:"card-title"},"HOLDINGS DETAIL"),
           e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11}},
             e("thead",null,e("tr",{style:{borderBottom:"1px solid #1a2540"}},
-              ["TICKER","NAME","TYPE","WT%","1Y RET","VOL","BETA","SHARPE","YIELD","FIT"].map(h=>e("th",{key:h,style:{padding:"3px 5px",textAlign:"left",fontSize:9,color:"#475569",fontWeight:"bold"}},h))
+              ["TICKER","NAME","TYPE","WT%","1Y RET","VOL","BETA","SHARPE","YIELD","SCREEN MATCH"].map(h=>e("th",{key:h,style:{padding:"3px 5px",textAlign:"left",fontSize:9,color:"#475569",fontWeight:"bold"}},h))
             )),
             e("tbody",null,tickers.map((k,i)=>{
               const a=ASSETS.find(u=>u.id===k)||{};
@@ -2334,7 +2341,7 @@ function TradeDeck({weights,profile}){
           tr.limitEntry&&e("div",{className:"price-box"},e("div",{className:"price-lbl"},"LIMIT ENTRY"),e("div",{className:"price-val",style:{color:"#818cf8"}},"$"+tr.limitEntry)),
           e("div",{className:"price-box"},e("div",{className:"price-lbl"},"STOP LOSS"),e("div",{className:"price-val dn"},tr.stop?"$"+tr.stop:"—")),
           e("div",{className:"price-box"},e("div",{className:"price-lbl"},"TARGET"),e("div",{className:"price-val up"},tr.tgt?"$"+tr.tgt:"—")),
-          e("div",{className:"price-box"},e("div",{className:"price-lbl"},"FIT SCORE"),e("div",{className:"price-val",style:{color:tr.fit>=70?"#1D9E75":tr.fit>=45?"#f59e0b":"#ef4444"}},tr.fit+"/100"))
+          e("div",{className:"price-box"},e("div",{className:"price-lbl"},"SCREEN MATCH"),e("div",{className:"price-val",style:{color:tr.fit>=70?"#1D9E75":tr.fit>=45?"#f59e0b":"#ef4444"}},tr.fit+"/100"))
         )
       );
     })
@@ -2379,7 +2386,7 @@ function Compare({ports}){
 // NOTE: component identifier `Advisor` retained (internal, never rendered) — see
 // INTERFACE_VERDICTS_SPEC.md Part B advis-sweep classification (REPORTED-IDENTIFIER).
 function Advisor({profile,ports,activePort}){
-  const[msgs,setMsgs]=useState([{r:"ai",t:"Welcome to Quantex AI — powered by Claude.\n\nComplete ① PROFILE first. Assets in Discovery are then ranked by Fit Score for your specific profile, goal, and time horizon.\n\nAsk me how any metric on this screen is computed or what it means. I explain the analytics — I don't recommend what to buy, sell, or hold."}]);
+  const[msgs,setMsgs]=useState([{r:"ai",t:"Welcome to Quantex AI — powered by Claude.\n\nComplete ① PROFILE first. Assets in Discovery are then ranked by screen match for your specific profile, goal, and time horizon.\n\nAsk me how any metric on this screen is computed or what it means. I explain the analytics — I don't recommend what to buy, sell, or hold."}]);
   const[inp,setInp]=useState("");
   const[loading,setLoading]=useState(false);
   const[apiKey,setApiKey]=useState(()=>{try{return localStorage.getItem("qx_api_key")||"";}catch(e){return"";}});
@@ -2411,7 +2418,7 @@ function Advisor({profile,ports,activePort}){
   };
 
   const send=()=>{if(!inp.trim()||loading)return;const u=inp.trim();setInp("");setMsgs(m=>[...m,{r:"usr",t:u}]);askClaude(u);};
-  const QUICK=["Walk me through my portfolio's key metrics","Explain my Sharpe ratio","How does hedging work for a portfolio like this?","How does the Fit Score rank assets for my profile?","What does rebalancing do, and what are its tradeoffs?"];
+  const QUICK=["Walk me through my portfolio's key metrics","Explain my Sharpe ratio","How does hedging work for a portfolio like this?","How does screen match rank assets for my profile?","What does rebalancing do, and what are its tradeoffs?"];
 
   return e(React.Fragment,null,
     e("div",{className:"adv-hdr"},"Ask Quantex",e("div",{style:{display:"flex",alignItems:"center",gap:6}},e("span",{className:"adv-badge"},apiKey?"Claude ✓":"No Key"),e("button",{onClick:()=>setShowKey(!showKey),style:{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:11}},"⚙"))),
@@ -3432,6 +3439,12 @@ function CourseHub({profile,ports,activePort}){
   };
 
   const MODULES=[
+    {id:"ranker_test",level:"Method",title:"We tested our own ranker against 1000 random portfolios",topic:"Integrity",
+     reading:{title:"We tested our own ranker against 1000 random portfolios",content:"<h3>Why we ran this</h3>A tool that sorts securities by \"screen match\" is only worth showing if its top names actually do better than names picked at random from the same universe. So we tested it — walk-forward, out of sample, against a null of 1,000 random portfolios. The pass/fail thresholds were written down and sealed <i>before</i> the test ran.<h3>Method</h3>38 quarterly freeze dates, 2016 through 2025. At each date, using only data available then, we rebuilt the screen and took the top 10 by screen match, equal-weighted, held 12 months. We compared each to 1,000 random 10-name portfolios drawn from the same screened universe (fixed random seed). We scored the top-10 by its percentile within that random distribution, per metric.<h3>What we found — all four verdicts, including the failures</h3><ul><li><b>Growth screen — PASS, but marked UNVALIDATED.</b> Its top names beat random on risk-adjusted return (median 79th percentile). We do <i>not</i> claim this as a win: the test universe is today's survivors, which flatters momentum by hiding the names that crashed and delisted. Held pending a re-run that includes delisted companies.</li><li><b>Income screen — MARGINAL.</b> It reliably delivered income (top-percentile realized yield, low volatility) but its risk-adjusted return was unremarkable (26th percentile). It does its one job — income — and not much more.</li><li><b>Balanced screen — DECORATION.</b> Its top names were no better than random on risk-adjusted return (43rd percentile, below our sealed 45 fail line). For Balanced profiles we have <b>removed the ranked ordering</b> in Discovery — the list is shown alphabetically, with the factor data still visible.</li><li><b>Profile differentiation — PASS.</b> Growth, Balanced, and Income portfolios had distinctly different realized betas in 100% of windows, so the profiles do produce genuinely different portfolios.</li></ul><h3>The honest caveat</h3>Free data means survivorship bias: companies that were delisted are missing, which inflates every backward-looking result. In this test a failure is strong evidence; a pass is weak. The Growth pass is exactly the case we flagged to re-check with a delisting-inclusive dataset before making any claim.<h3>Why we're showing you this</h3>Because a tool that grades securities should be willing to grade itself — and publish the result even when it's unflattering."},
+     quiz:[
+       {q:"In the walk-forward test, what was the verdict on the Income screen?",opts:["PASS — beat random on every metric","MARGINAL — delivered income but unremarkable risk-adjusted return","DECORATION — no better than random on anything","It was not tested"],correct:1,explain:"The Income screen delivered top-percentile realized yield and below-median volatility, but its risk-adjusted return (Sharpe) sat near the 26th percentile — under the 40th-percentile bar. It does its income job and little more, so the verdict is MARGINAL, not PASS."},
+       {q:"Why is the Growth screen's PASS labeled 'unvalidated'?",opts:["The code had a bug","Survivorship bias — the test universe is today's survivors, which flatters momentum; it needs a delisting-inclusive re-run","It failed the profile-differentiation check","No random portfolios were used"],correct:1,explain:"The universe is today's index membership, so companies delisted before now are absent. That truncates momentum's crash tail and inflates the Growth result. A pass on survivor-only data is weak evidence, so it is marked unvalidated pending a re-run that includes delisted names."}
+     ]},
     {id:"ethics",level:"L1",title:"Ethics and Professional Standards",topic:"Ethics",
      reading:{title:"Ethics and Professional Standards",content:"<h3>Reading Coming in Next Batch</h3>The full reading for this module is being prepared separately. For now, proceed to the Quiz tab (15 questions) to test your knowledge of the CFA Code of Ethics and Standards of Professional Conduct."},
      quiz:[
