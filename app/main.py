@@ -64,6 +64,9 @@ from app.models import (
     ReferenceHedgeInfo,
     PricesRequest,
     PricesResponse,
+    DiscoveryContextRequest,
+    DiscoveryContextResponse,
+    DiscoveryContextEntry,
     SearchRequest,
     SearchResult,
     TickerAddRequest,
@@ -88,6 +91,7 @@ from app.correlation_engine import (
     lambda_from_risk_score,
 )
 from app.cache import cache_key, cache_get, cache_set
+from app.discovery_context import compute_candidate_context
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -395,6 +399,62 @@ async def get_diagnostics(req: DiagnosticsRequest):
 
     cache_set(ck, response.model_dump(), CACHE_TTL_DAILY)
     return response
+
+
+@app.post("/api/discovery/context", response_model=DiscoveryContextResponse)
+async def discovery_context(req: DiscoveryContextRequest):
+    """
+    Discovery column: "Corr (calm / stress)" — CORRELATION_COLUMN_SPEC.md §A.
+
+    For each candidate, computes 2-series Pearson correlation against the
+    user's value-weighted active portfolio, in the trailing 252-day normal
+    window and over data_ingest's identified stress windows (>= MIN_STRESS_DAYS
+    for a stable estimate). Held candidates are compared against the
+    portfolio excluding themselves (renormalized).
+
+    Separate call from `/api/screen` by design (§E4): this must never add
+    latency to screening. One batched call per shortlist — no per-candidate
+    yfinance calls; reads the cached price/returns frame only.
+
+    No Ledoit-Wolf shrinkage: each computation is a 2-series Pearson
+    correlation, not a matrix — shrinkage does not apply (§A3).
+    """
+    if not req.holdings:
+        # §A4: empty portfolio — caller should hide the column entirely and
+        # never invoke this endpoint. If it is called anyway, return empty
+        # results rather than guessing at a portfolio.
+        return DiscoveryContextResponse(results=[])
+
+    holdings = {h.ticker: h.weight for h in req.holdings}
+    all_needed = list(set(list(holdings.keys()) + list(req.candidates)))
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _ensure_data, all_needed)
+
+    returns = _store["returns"]
+    stress_mask = _store["stress_mask"]
+
+    results = []
+    for ticker in req.candidates:
+        ctx = compute_candidate_context(
+            ticker=ticker,
+            returns=returns,
+            stress_mask=stress_mask,
+            holdings=holdings,
+            window=req.window,
+        )
+        results.append(DiscoveryContextEntry(
+            ticker=ctx.ticker,
+            corr_normal=ctx.corr_normal,
+            corr_stress=ctx.corr_stress,
+            band=ctx.band,
+            flip_flag=ctx.flip_flag,
+            days_normal=ctx.days_normal,
+            days_stress=ctx.days_stress,
+            status=ctx.status,
+        ))
+
+    return DiscoveryContextResponse(results=results)
 
 
 @app.post("/api/data/refresh")
@@ -1437,6 +1497,7 @@ async def screen_universe(req: ScreenRequest):
     await loop.run_in_executor(None, _ensure_data, tickers)
 
     returns = _store["returns"]
+    prices = _store["prices"]
 
     try:
         result = await loop.run_in_executor(
@@ -1448,6 +1509,7 @@ async def screen_universe(req: ScreenRequest):
                 time_horizon_years=req.time_horizon_years,
                 max_results=req.max_results,
                 tickers=req.tickers,
+                prices=prices,
             ),
         )
     except ValueError as e:
@@ -1471,6 +1533,9 @@ async def screen_universe(req: ScreenRequest):
                 dividend_growth_5y=a.dividend_growth_5y,
                 debt_to_equity=a.debt_to_equity,
                 revenue_growth=a.revenue_growth,
+                return_3y=a.return_3y, return_5y=a.return_5y,
+                max_dd_5y=a.max_dd_5y, dd_window_days=a.dd_window_days,
+                pct_off_52wk_high=a.pct_off_52wk_high,
                 z_momentum=a.z_momentum, z_quality=a.z_quality,
                 z_value=a.z_value, z_low_vol=a.z_low_vol, z_yield=a.z_yield,
                 factor_composite=a.factor_composite, fit_score=a.fit_score, rank=a.rank,

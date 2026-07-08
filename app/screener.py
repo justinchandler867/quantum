@@ -98,6 +98,16 @@ class ScreenedAsset:
     debt_to_equity: float | None = None
     revenue_growth: float | None = None
 
+    # Multi-horizon metrics (MULTI_HORIZON_SPEC.md §1) — simple (non-annualized)
+    # cumulative returns computed directly from the price frame, plus the
+    # 5y-windowed max drawdown and 52-week-high extension. None when the
+    # ticker lacks the required history window (never a partial-window number).
+    return_3y: float | None = None
+    return_5y: float | None = None
+    max_dd_5y: float | None = None
+    dd_window_days: int | None = None
+    pct_off_52wk_high: float | None = None
+
     # Factor z-scores
     z_momentum: float = 0.0
     z_quality: float = 0.0
@@ -447,6 +457,67 @@ def compute_factor_scores(
     return result
 
 
+def compute_multi_horizon(prices: pd.DataFrame, tickers: list[str]) -> pd.DataFrame:
+    """
+    Compute the multi-horizon price-based metrics from MULTI_HORIZON_SPEC.md §1,
+    directly from the adjusted-close PRICE frame (not the log-return frame) —
+    these are simple, non-annualized, cumulative returns:
+
+      return_3y            = P_t / P_{t-756} - 1
+      return_5y             = P_t / P_{t-1260} - 1
+      max_dd_5y             = min over available window (<=1260d) of (P/cummax(P) - 1)
+      dd_window_days        = actual number of days used for max_dd_5y
+      pct_off_52wk_high     = P_t / max(P over trailing 252d) - 1   (<= 0 by construction)
+
+    Insufficient-history rule: if a ticker lacks the full window (756d for 3Y,
+    1260d for 5Y), the corresponding field is None — never a partial-window
+    number in a column headed 3Y/5Y. max_dd_5y may use a shorter available
+    window but is then flagged via dd_window_days < 756.
+
+    Returns a DataFrame indexed by ticker with columns:
+      return_3y, return_5y, max_dd_5y, dd_window_days, pct_off_52wk_high
+    (all as decimals/day-counts; percentage scaling happens at display time,
+    same convention as compute_factor_scores' raw return_1y/6m/3m.)
+    """
+    cols = [t for t in tickers if t in prices.columns]
+    out = pd.DataFrame(index=cols, columns=[
+        "return_3y", "return_5y", "max_dd_5y", "dd_window_days", "pct_off_52wk_high",
+    ])
+
+    for t in cols:
+        px = prices[t].dropna()
+        n = len(px)
+        last = px.iloc[-1]
+
+        # return_3y: needs >= 756 trading days of history
+        if n > 756:
+            out.at[t, "return_3y"] = float(last / px.iloc[-1 - 756] - 1)
+        else:
+            out.at[t, "return_3y"] = None
+
+        # return_5y: needs >= 1260 trading days of history
+        if n > 1260:
+            out.at[t, "return_5y"] = float(last / px.iloc[-1 - 1260] - 1)
+        else:
+            out.at[t, "return_5y"] = None
+
+        # max_dd_5y: use up to the trailing 1260 days, but may use a shorter
+        # window (flagged via dd_window_days) if less history is available.
+        window_px = px.iloc[-1260:] if n > 1260 else px
+        dd_window_days = int(len(window_px))
+        cummax = window_px.cummax()
+        dd = (window_px / cummax - 1)
+        out.at[t, "max_dd_5y"] = float(dd.min())
+        out.at[t, "dd_window_days"] = dd_window_days
+
+        # pct_off_52wk_high: trailing 252 days (or all available if shorter)
+        trailing_252 = px.iloc[-252:] if n > 252 else px
+        high_52wk = trailing_252.max()
+        out.at[t, "pct_off_52wk_high"] = float(last / high_52wk - 1)
+
+    return out
+
+
 def rank_by_composite(
     scored: pd.DataFrame,
     factor_weights: dict[str, float],
@@ -584,6 +655,7 @@ def run_screening_pipeline(
     time_horizon_years: float = 7.0,
     max_results: int = SCREEN_FINAL_SIZE,
     tickers: list[str] | None = None,
+    prices: pd.DataFrame | None = None,
 ) -> ScreeningResult:
     """
     Run the full four-stage screening pipeline.
@@ -595,6 +667,14 @@ def run_screening_pipeline(
         time_horizon_years: Investor time horizon
         max_results: How many candidates to return
         tickers: Optional custom ticker list (skips universe loading)
+        prices: Full adjusted-close price DataFrame (from data_ingest.fetch_prices),
+            same universe/date-range as `returns`. Used ONLY for the
+            multi-horizon fields (return_3y/5y, max_dd_5y, dd_window_days,
+            pct_off_52wk_high) per MULTI_HORIZON_SPEC.md §1/§2 — these are
+            computed directly from price levels, not from log returns, in the
+            SAME PASS as existing metrics (no extra data fetch). If omitted,
+            the new fields are left as None on every ScreenedAsset (back-compat
+            for any caller that hasn't threaded the price frame through yet).
 
     Returns:
         ScreeningResult with ranked shortlist and pipeline metadata
@@ -624,6 +704,18 @@ def run_screening_pipeline(
     final = compute_fit_scores(ranked, goal, risk_score, time_horizon_years)
     final = final.head(max_results)
 
+    # Multi-horizon metrics (MULTI_HORIZON_SPEC.md §1/§2) — computed from the
+    # PRICE frame (not returns) in this same pass, no extra data fetch.
+    if prices is not None:
+        mh = compute_multi_horizon(prices, final["ticker"].tolist())
+        final = final.set_index("ticker")
+        for col in ["return_3y", "return_5y", "max_dd_5y", "dd_window_days", "pct_off_52wk_high"]:
+            final[col] = mh[col]
+        final = final.reset_index()
+    else:
+        for col in ["return_3y", "return_5y", "max_dd_5y", "dd_window_days", "pct_off_52wk_high"]:
+            final[col] = None
+
     # Build output
     shortlist = []
     for _, row in final.iterrows():
@@ -638,9 +730,20 @@ def run_screening_pipeline(
             market_cap=row.get("market_cap", 0),
             price=row.get("price", 0),
             avg_volume=row.get("avg_volume", 0),
-            return_1y=round(float(row.get("return_1y", 0) * 100), 2),
-            return_6m=round(float(row.get("return_6m", 0) * 100), 2),
-            return_3m=round(float(row.get("return_3m", 0) * 100), 2),
+            # F1 regression note: return_1y/6m/3m are stored in `raw` (and thus
+            # in this merged `row`) as a SUM OF LOG RETURNS over the horizon,
+            # per data_ingest.compute_log_returns (ln(P_t/P_t-1)). Multiplying
+            # that sum by 100 (the old code here) displays the log-sum itself,
+            # not a percentage return — understating gains and overstating
+            # losses (verified numerically: Sigma_log=0.842 previously
+            # displayed "+84.2%" when the true simple return is
+            # exp(0.842)-1 = +132.10%). Fixed by exponentiating before scaling
+            # to a percent: (exp(Sigma_log) - 1) * 100. This is DISPLAY ONLY —
+            # compute_factor_scores' z_momentum/composite ranking still uses
+            # the raw log sums untouched (rank-equivalent, see MULTI_HORIZON_SPEC.md §0).
+            return_1y=round((float(np.exp(row.get("return_1y", 0))) - 1) * 100, 2),
+            return_6m=round((float(np.exp(row.get("return_6m", 0))) - 1) * 100, 2),
+            return_3m=round((float(np.exp(row.get("return_3m", 0))) - 1) * 100, 2),
             volatility=round(float(row.get("volatility", 0) * 100), 2),
             sharpe=round(float(row.get("sharpe", 0)), 3),
             beta=round(float(row.get("beta", 1)), 3),
@@ -654,6 +757,16 @@ def run_screening_pipeline(
             dividend_growth_5y=_safe_round(row.get("dividend_growth_5y")),
             debt_to_equity=_safe_round(row.get("debt_to_equity")),
             revenue_growth=_safe_round(row.get("revenue_growth")),
+            # Multi-horizon fields (MULTI_HORIZON_SPEC.md §1) — already simple
+            # (non-log) cumulative returns from compute_multi_horizon; only
+            # need *100 scaling to match the other percentage display fields.
+            # None/NaN (insufficient history) is preserved as None, never a
+            # partial-window number.
+            return_3y=_safe_round_pct(row.get("return_3y")),
+            return_5y=_safe_round_pct(row.get("return_5y")),
+            max_dd_5y=_safe_round_pct(row.get("max_dd_5y")),
+            dd_window_days=_safe_int(row.get("dd_window_days")),
+            pct_off_52wk_high=_safe_round_pct(row.get("pct_off_52wk_high")),
             z_momentum=round(float(row.get("z_momentum", 0)), 3),
             z_quality=round(float(row.get("z_quality", 0)), 3),
             z_value=round(float(row.get("z_value", 0)), 3),
@@ -688,5 +801,40 @@ def _safe_round(val, decimals=2):
         if math.isnan(val) or math.isinf(val):
             return None
         return round(float(val), decimals)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_round_pct(val, decimals=2):
+    """
+    Scale a decimal simple return (e.g. 0.132) to a percentage (13.2) and
+    round, returning None if input is None/NaN — used for the multi-horizon
+    fields (return_3y/5y, max_dd_5y, pct_off_52wk_high), which are already
+    simple (non-log) returns coming out of compute_multi_horizon and just
+    need the same *100 display scaling as the other return fields.
+    """
+    if val is None:
+        return None
+    try:
+        import math
+        fval = float(val)
+        if math.isnan(fval) or math.isinf(fval):
+            return None
+        return round(fval * 100, decimals)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_int(val):
+    """Cast a value to int, returning None if input is None/NaN — used for
+    dd_window_days, which is a day-count, not a percentage."""
+    if val is None:
+        return None
+    try:
+        import math
+        fval = float(val)
+        if math.isnan(fval) or math.isinf(fval):
+            return None
+        return int(fval)
     except (TypeError, ValueError):
         return None

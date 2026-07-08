@@ -379,6 +379,14 @@ function mapScreened(item) {
     debtEq: item.debt_to_equity,
     revGrowth: item.revenue_growth,
     maxDD: item.max_drawdown || 0,
+    // Multi-horizon fields (MULTI_HORIZON_SPEC.md §1/§2) — null/undefined
+    // when a ticker lacks the required history window; rendered as "—" in
+    // the Discovery table, never a partial-window number.
+    ret3y: item.return_3y ?? null,
+    ret5y: item.return_5y ?? null,
+    maxDD5y: item.max_dd_5y ?? null,
+    ddWindowDays: item.dd_window_days ?? null,
+    pctOff52wk: item.pct_off_52wk_high ?? null,
   };
 }
 
@@ -743,7 +751,7 @@ function Discovery({profile,ports,onAdd}){
     return{...a,fit};
   }).filter(a=>(tf==="All"||a.t===tf||a.sec===tf)&&(!search||a.id.toLowerCase().includes(search.toLowerCase())||a.n.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>sd*(b[sk]||0)-sd*(a[sk]||0));
   const hs=k=>{if(sk===k)setSd(d=>-d);else{setSk(k);setSd(-1);}};
-  const TH=(f,l)=>e("th",{onClick:()=>hs(f)},l+(sk===f?(sd===-1?"↓":"↑"):"↕"));
+  const TH=(f,l,tip)=>e("th",{onClick:()=>hs(f),title:tip||undefined},l+(sk===f?(sd===-1?"↓":"↑"):"↕"));
   const pks=Object.keys(ports);
   return e("div",null,
     e("div",{className:"card"},
@@ -760,7 +768,7 @@ function Discovery({profile,ports,onAdd}){
       ),
       profile?.goal==="Growth"&&e("div",{className:"warn-box",style:{marginTop:8,marginBottom:8}},
         e("b",null,"What this screen selects on."),
-        " Growth screens here are momentum-weighted: they surface what has already gone up. The momentum premium is real, and it reverses violently in regime shifts — past momentum crashes took back years of gains in weeks. The more a name has run, the more of that risk it carries."
+        " Growth screens here are momentum-weighted: they surface what has already gone up. The momentum premium is real, and it reverses violently in regime shifts — past momentum crashes took back years of gains in weeks. The more a name has run, the more of that risk it carries. The '% off 52-wk high' column shows you the extension directly."
       ),
       !howOpen&&e("div",{onClick:()=>setHowOpen(true),style:{cursor:"pointer",fontSize:12,color:"#94a3b8",padding:"6px 0",display:"flex",alignItems:"center",gap:6,marginBottom:4}},
         e("span",{style:{fontSize:14}},"ℹ"),
@@ -813,7 +821,12 @@ function Discovery({profile,ports,onAdd}){
       e("table",{className:"dtbl"},
         e("thead",null,e("tr",null,
           TH("fit","FIT"),TH("id","TICKER"),e("th",null,"NAME"),e("th",null,"TYPE"),
-          TH("ret","1Y RET"),TH("vol","VOL"),TH("beta","BETA"),TH("sh","SHARPE"),TH("yld","YIELD"),
+          TH("pctOff52wk","% OFF 52-WK HIGH","How far below its 52-week high this trades. Near 0% = extended; deep negative = fallen. Neither is automatically good."),
+          TH("ret","1Y","Total return over each period. One good year is not a track record — compare across horizons."),
+          TH("ret3y","3Y","Total return over each period. One good year is not a track record — compare across horizons."),
+          TH("ret5y","5Y","Total return over each period. One good year is not a track record — compare across horizons."),
+          TH("maxDD5y","MAX DD (5Y)","Worst peak-to-trough loss over five years. This is what holding it actually felt like."),
+          TH("vol","VOL"),TH("beta","BETA"),TH("sh","SHARPE"),TH("yld","YIELD"),
           TH("pe","P/E"),e("th",null,"NEXT EARNINGS"),
           e("th",null,"DIV GROWTH"),TH("debtEq","DEBT/EQ"),TH("revGrowth","REV GROWTH"),
           e("th",null,"RSI"),
@@ -839,7 +852,11 @@ function Discovery({profile,ports,onAdd}){
             e("td",{style:{fontWeight:"bold",color:TC[a.t]||"#818cf8"}},a.id),
             e("td",{style:{maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",color:"#94a3b8"}},a.n),
             e("td",null,e("span",{className:"type-badge",style:{background:(TC[a.t]||"#818cf8")+"22",color:TC[a.t]||"#818cf8"}},a.t)),
+            e("td",{className:(a.pctOff52wk==null||a.pctOff52wk<=0)?"dn":"up"},a.pctOff52wk==null?e("span",{title:"data unavailable"},"—"):a.pctOff52wk.toFixed(1)+"%"),
             e("td",{className:a.ret>=0?"up":"dn"},(a.ret>0?"+":"")+a.ret.toFixed(1)+"%"),
+            e("td",{className:a.ret3y==null?"":a.ret3y>=0?"up":"dn"},a.ret3y==null?e("span",{title:"listed less than 3 years"},"—"):(a.ret3y>0?"+":"")+a.ret3y.toFixed(1)+"%"),
+            e("td",{className:a.ret5y==null?"":a.ret5y>=0?"up":"dn"},a.ret5y==null?e("span",{title:"listed less than 5 years"},"—"):(a.ret5y>0?"+":"")+a.ret5y.toFixed(1)+"%"),
+            e("td",null,a.maxDD5y==null?e("span",{title:"listed less than 5 years"},"—"):e("span",{title:a.ddWindowDays!=null&&a.ddWindowDays<756?"Based on a shorter price history than 5 years ("+a.ddWindowDays+" trading days) — treat as provisional.":undefined},a.maxDD5y.toFixed(1)+"%"+(a.ddWindowDays!=null&&a.ddWindowDays<756?"*":""))),
             e("td",null,a.vol.toFixed(1)+"%"),
             e("td",null,a.beta.toFixed(2)),
             e("td",{style:{color:a.sh>=1?"#1D9E75":a.sh>=.5?"#f59e0b":"#ef4444",fontWeight:"bold"}},a.sh.toFixed(2)),
@@ -856,7 +873,7 @@ function Discovery({profile,ports,onAdd}){
             ))
           );
         })),
-        e("tfoot",null,e("tr",null,e("td",{colSpan:17,style:{padding:"8px 6px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Fit scores rate each security on its own — they don't know what you already hold. Two top-ranked names can be near-duplicates of each other or of your portfolio. Diversification happens in the optimizer, not in this list.")))
+        e("tfoot",null,e("tr",null,e("td",{colSpan:21,style:{padding:"8px 6px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Fit scores rate each security on its own — they don't know what you already hold. Two top-ranked names can be near-duplicates of each other or of your portfolio. Diversification happens in the optimizer, not in this list.")))
       )
     ),
     openTicker&&e(TickerChart,{ticker:openTicker,name:(ASSETS.find(x=>x.id===openTicker)||{}).n,onClose:()=>setOpenTicker(null)}),

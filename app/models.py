@@ -74,6 +74,37 @@ class DiagnosticsResponse(BaseModel):
     warnings: list[str]
 
 
+# ── Discovery Column: "Corr (calm / stress)" (CORRELATION_COLUMN_SPEC.md §A) ─
+
+class HoldingInput(BaseModel):
+    ticker: str
+    weight: float = Field(..., description="Portfolio weight; need not be pre-normalized to sum 1")
+
+
+class DiscoveryContextRequest(BaseModel):
+    holdings: list[HoldingInput] = Field(
+        default_factory=list,
+        description="User's active portfolio holdings. Empty => caller should not invoke this endpoint (§A4).",
+    )
+    candidates: list[str] = Field(..., min_length=1, max_length=100, description="Shortlisted tickers")
+    window: int = Field(252, ge=60, le=1260)
+
+
+class DiscoveryContextEntry(BaseModel):
+    ticker: str
+    corr_normal: float | None
+    corr_stress: float | None
+    band: str | None
+    flip_flag: bool
+    days_normal: int
+    days_stress: int
+    status: str = Field(..., pattern="^(ok|held|insufficient_data|no_stress_window)$")
+
+
+class DiscoveryContextResponse(BaseModel):
+    results: list[DiscoveryContextEntry]
+
+
 # ── Optimizer Models ─────────────────────────────────────────────────────────
 
 class ProfileConstraintsInput(BaseModel):
@@ -254,6 +285,13 @@ class ScreenedAssetResponse(BaseModel):
     dividend_growth_5y: float | None = None
     debt_to_equity: float | None = None
     revenue_growth: float | None = None
+    # Multi-horizon fields (MULTI_HORIZON_SPEC.md §1/§2) — None when a ticker
+    # lacks the required history window (never a partial-window number).
+    return_3y: float | None = None
+    return_5y: float | None = None
+    max_dd_5y: float | None = None
+    dd_window_days: int | None = None
+    pct_off_52wk_high: float | None = None
     z_momentum: float
     z_quality: float
     z_value: float
