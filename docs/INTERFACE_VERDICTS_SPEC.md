@@ -90,3 +90,9 @@ Panel titled with the regulated word "ADVISER" and populated with advice-shaped 
 **Commit message:** `interface: remove verdict language (SIGNAL→TREND) and rename AI ADVISER→Ask Quantex per IDENTITY.md §5`
 
 **STOP conditions (report, don't improvise):** verdict logic has no recoverable indicator semantics (A2); "advis" hits in identifiers (B2); missing/absent system prompt (B2); any current chip not covered by the replacement table (B2); any test failure traceable to ranking rather than labels (Acceptance 3–4).
+
+---
+
+## Amendment 1 (2026-07-07): A2 premise corrected — verdict source is Sharpe threshold, not technical state; column remediated as SHARPE (1Y) with factual bands; modal 884 description corrected to match computation.
+
+## Amendment 2 (2026-07-07): scope boundary — Indicator Consensus remediated to descriptive tilt; Trade Desk recommendation engine identified as separate defect (disclaimer-camouflage pattern, IDENTITY.md §1/§5), deferred to its own sealed spec TRADE_DESK_SPEC.md; temp shim in place; fundamental.py recommendation field under source review.

@@ -179,7 +179,7 @@ body{font-family:'DM Sans',sans-serif;background:#0a0e1a;color:#c8d2e0;font-size
 .cmp-cell{flex:1;padding:7px 10px;text-align:center;font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace}
 .cmp-win{background:rgba(52,211,153,.06);color:#34d399}
 .cmp-sec{font-size:9px;font-weight:700;letter-spacing:1px;color:#6366f1;padding:7px 10px;background:rgba(99,102,241,.04);border-bottom:1px solid rgba(99,102,241,.06);display:flex}
-/* Advisor */
+/* Ask Quantex panel */
 .adv-hdr{padding:10px 12px;font-size:10px;font-weight:700;letter-spacing:1.5px;color:#6366f1;border-bottom:1px solid rgba(99,102,241,.08);flex-shrink:0;display:flex;align-items:center;justify-content:space-between}
 .adv-badge{font-size:9px;padding:2px 8px;background:rgba(99,102,241,.12);color:#a5b4fc;border-radius:8px;font-weight:600}
 .adv-msgs{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
@@ -366,7 +366,7 @@ function mapScreened(item) {
     id: item.ticker, n: item.name || item.ticker, t: item.asset_type || item.sector || "Stock",
     sec: item.sector || "Unknown", ret: ret1y, vol: item.volatility || 20,
     beta: item.beta || 1, sh: sh, yld: yld,
-    sig: sh >= 1.5 ? "Strong Buy" : sh >= 1 ? "Buy" : sh >= 0.5 ? "Hold" : "Sell",
+    sig: sharpeBand(sh),  // Sharpe band, not a verdict (INTERFACE_VERDICTS_SPEC.md Amendment 1)
     rsi: null, macd: null, tgt: null, stop: null,
     goals: [], rb: [1, 5], hm: 3,
     s08: 0, s20: 0, s22: 0,
@@ -390,45 +390,74 @@ function mapScreened(item) {
   };
 }
 
+// Sharpe (1Y) descriptive band — factual replacement for the retired verdict
+// labels (see INTERFACE_VERDICTS_SPEC.md A2 / Amendment 1). Closed vocabulary.
+function sharpeBand(sh){
+  if(sh==null||isNaN(sh))return null;
+  if(sh>=1.5)return"High";
+  if(sh>=1.0)return"Moderate";
+  if(sh>=0.5)return"Low";
+  if(sh>=0)return"Minimal";
+  return"Negative";
+}
+// Cell text + factual tooltip for the SHARPE (1Y) column. The reconciling
+// formula is shown only when the row's inputs are internally consistent
+// (live/screened data); illustrative sample rows may not reconcile, so those
+// fall back to a factual (non-equation) tooltip rather than assert a false "=".
+function sharpeCell(a){
+  const RF=4.3; // risk-free %, matches backend RISK_FREE_RATE (config.py:54)
+  if(a==null||a.sh==null||isNaN(a.sh)||a.vol==null||a.vol<=0)
+    return{text:"—",tip:"Insufficient data"};
+  const band=sharpeBand(a.sh);
+  let tip;
+  if(a.ret!=null&&Math.abs((a.ret-RF)/a.vol-a.sh)<0.05)
+    tip="1Y return "+a.ret.toFixed(1)+"% − rf "+RF+"%, ÷ vol "+a.vol.toFixed(1)+"% = Sharpe "+a.sh.toFixed(2);
+  else if(a.ret!=null)
+    tip="Sharpe "+a.sh.toFixed(2)+" · 1Y return "+a.ret.toFixed(1)+"% · vol "+a.vol.toFixed(1)+"% · rf "+RF+"%";
+  else
+    tip="Sharpe "+a.sh.toFixed(2)+" · vol "+a.vol.toFixed(1)+"% · rf "+RF+"%";
+  return{text:a.sh.toFixed(2)+" · "+band,tip:tip};
+}
+
 const FALLBACK_ASSETS = [
-  {id:"AAPL",n:"Apple Inc.",t:"Stock",sec:"Technology",ret:24.8,vol:28,beta:1.24,sh:1.31,yld:.5,sig:"Buy",rsi:61,macd:"Bullish",tgt:235,stop:188,goals:["Growth","Balanced"],rb:[2,5],hm:3,s08:-54,s20:-32,s22:-27},
-  {id:"MSFT",n:"Microsoft Corp.",t:"Stock",sec:"Technology",ret:18.2,vol:26,beta:.91,sh:1.42,yld:.7,sig:"Strong Buy",rsi:58,macd:"Bullish",tgt:480,stop:390,goals:["Growth","Balanced"],rb:[2,5],hm:3,s08:-44,s20:-28,s22:-29},
-  {id:"NVDA",n:"NVIDIA Corp.",t:"Stock",sec:"Technology",ret:62.4,vol:58,beta:1.89,sh:1.74,yld:0,sig:"Strong Buy",rsi:72,macd:"Bullish",tgt:1000,stop:810,goals:["Growth"],rb:[4,5],hm:5,s08:-72,s20:-42,s22:-66},
-  {id:"META",n:"Meta Platforms",t:"Stock",sec:"Technology",ret:64.2,vol:44,beta:1.28,sh:1.38,yld:.4,sig:"Strong Buy",rsi:68,macd:"Bullish",tgt:620,stop:460,goals:["Growth"],rb:[3,5],hm:3,s08:-55,s20:-35,s22:-64},
-  {id:"AMZN",n:"Amazon.com",t:"Stock",sec:"Technology",ret:42.1,vol:32,beta:1.33,sh:1.18,yld:0,sig:"Buy",rsi:64,macd:"Bullish",tgt:220,stop:165,goals:["Growth","Balanced"],rb:[3,5],hm:3,s08:-45,s20:-18,s22:-50},
-  {id:"GOOGL",n:"Alphabet Inc.",t:"Stock",sec:"Technology",ret:35.8,vol:28,beta:1.12,sh:1.22,yld:0,sig:"Buy",rsi:59,macd:"Neutral",tgt:200,stop:155,goals:["Growth","Balanced"],rb:[3,5],hm:3,s08:-55,s20:-30,s22:-40},
-  {id:"JPM",n:"JPMorgan Chase",t:"Stock",sec:"Financials",ret:31.2,vol:29,beta:1.08,sh:.98,yld:2.4,sig:"Buy",rsi:55,macd:"Neutral",tgt:220,stop:182,goals:["Balanced","Income"],rb:[2,5],hm:3,s08:-68,s20:-38,s22:-18},
-  {id:"JNJ",n:"Johnson & Johnson",t:"Stock",sec:"Healthcare",ret:3.1,vol:16,beta:.62,sh:.61,yld:3.4,sig:"Hold",rsi:44,macd:"Bearish",tgt:165,stop:148,goals:["Income","Preservation"],rb:[1,3],hm:1,s08:-22,s20:-14,s22:-6},
-  {id:"XOM",n:"Exxon Mobil",t:"Stock",sec:"Energy",ret:12.4,vol:25,beta:1.22,sh:.72,yld:3.8,sig:"Hold",rsi:51,macd:"Neutral",tgt:125,stop:108,goals:["Income","Balanced"],rb:[2,4],hm:3,s08:-51,s20:-44,s22:52},
-  {id:"COST",n:"Costco Wholesale",t:"Stock",sec:"Consumer",ret:29.8,vol:18,beta:.82,sh:1.42,yld:.6,sig:"Buy",rsi:63,macd:"Bullish",tgt:920,stop:795,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-28,s20:-12,s22:-8},
-  {id:"LLY",n:"Eli Lilly & Co.",t:"Stock",sec:"Healthcare",ret:54.8,vol:32,beta:.48,sh:1.62,yld:.7,sig:"Strong Buy",rsi:66,macd:"Bullish",tgt:920,stop:740,goals:["Growth","Balanced"],rb:[3,5],hm:5,s08:-20,s20:-12,s22:-8},
-  {id:"AVGO",n:"Broadcom Inc.",t:"Stock",sec:"Technology",ret:84.2,vol:42,beta:1.44,sh:1.88,yld:1.2,sig:"Strong Buy",rsi:70,macd:"Bullish",tgt:1800,stop:1380,goals:["Growth"],rb:[4,5],hm:5,s08:-55,s20:-38,s22:-42},
-  {id:"PG",n:"Procter & Gamble",t:"Stock",sec:"Consumer",ret:11.2,vol:14,beta:.52,sh:.82,yld:2.4,sig:"Hold",rsi:48,macd:"Neutral",tgt:175,stop:158,goals:["Income","Preservation","Balanced"],rb:[1,3],hm:1,s08:-18,s20:-10,s22:-8},
-  {id:"BRK_B",n:"Berkshire Hathaway B",t:"Stock",sec:"Financials",ret:22.1,vol:21,beta:.84,sh:1.02,yld:0,sig:"Buy",rsi:54,macd:"Neutral",tgt:460,stop:395,goals:["Balanced","Growth"],rb:[2,4],hm:3,s08:-36,s20:-22,s22:-4},
-  {id:"MA",n:"Mastercard Inc.",t:"Stock",sec:"Financials",ret:19.8,vol:22,beta:1.08,sh:1.12,yld:.6,sig:"Buy",rsi:57,macd:"Bullish",tgt:490,stop:415,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-58,s20:-32,s22:-20},
-  {id:"SPY",n:"SPDR S&P 500 ETF",t:"ETF",sec:"Diversified",ret:24.2,vol:17,beta:1.0,sh:1.21,yld:1.3,sig:"Buy",rsi:60,macd:"Bullish",tgt:560,stop:498,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-50,s20:-34,s22:-19},
-  {id:"QQQ",n:"Invesco QQQ ETF",t:"ETF",sec:"Technology",ret:31.4,vol:22,beta:1.18,sh:1.28,yld:.5,sig:"Buy",rsi:63,macd:"Bullish",tgt:480,stop:415,goals:["Growth"],rb:[3,5],hm:3,s08:-52,s20:-28,s22:-33},
-  {id:"GLD",n:"SPDR Gold Shares",t:"ETF",sec:"Commodities",ret:14.8,vol:15,beta:-.12,sh:.62,yld:0,sig:"Buy",rsi:62,macd:"Bullish",tgt:320,stop:285,goals:["Preservation","Balanced"],rb:[1,4],hm:1,s08:5,s20:24,s22:-2},
-  {id:"EFA",n:"iShares MSCI EAFE",t:"ETF",sec:"International",ret:18.2,vol:18,beta:.84,sh:.88,yld:2.8,sig:"Buy",rsi:55,macd:"Neutral",tgt:85,stop:72,goals:["Balanced","Growth"],rb:[2,4],hm:3,s08:-44,s20:-28,s22:-22},
-  {id:"HYG",n:"iShares HY Corp Bond ETF",t:"ETF",sec:"Fixed Income",ret:10.8,vol:9,beta:.48,sh:.82,yld:6.8,sig:"Hold",rsi:52,macd:"Neutral",tgt:80,stop:74,goals:["Income"],rb:[2,4],hm:1,s08:-32,s20:-20,s22:-14},
-  {id:"VNQ",n:"Vanguard Real Estate ETF",t:"ETF",sec:"Real Estate",ret:8.2,vol:22,beta:.88,sh:.48,yld:4.2,sig:"Hold",rsi:46,macd:"Bearish",tgt:90,stop:78,goals:["Income"],rb:[2,4],hm:3,s08:-68,s20:-38,s22:-28},
-  {id:"US10Y",n:"US 10-Year Treasury",t:"Bond",sec:"Fixed Income",ret:4.2,vol:8,beta:-.18,sh:.42,yld:4.4,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Income"],rb:[1,2],hm:1,s08:18,s20:18,s22:-18},
-  {id:"US2Y",n:"US 2-Year Treasury",t:"Bond",sec:"Fixed Income",ret:5.2,vol:2,beta:-.04,sh:1.22,yld:5.2,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation"],rb:[1,2],hm:1,s08:8,s20:4,s22:-4},
-  {id:"CORP_HY",n:"HY Corporate Bonds",t:"Bond",sec:"Fixed Income",ret:10.2,vol:11,beta:.42,sh:.74,yld:8.2,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Income"],rb:[2,4],hm:1,s08:-28,s20:-18,s22:-14},
-  {id:"MUNI",n:"Municipal Bond Index",t:"Bond",sec:"Fixed Income",ret:3.8,vol:5,beta:-.02,sh:.72,yld:3.6,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Income"],rb:[1,3],hm:1,s08:-8,s20:-4,s22:-12},
-  {id:"TIPS",n:"TIPS Bond Index",t:"Bond",sec:"Fixed Income",ret:2.8,vol:6,beta:-.08,sh:.34,yld:2.8,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation"],rb:[1,2],hm:1,s08:-4,s20:8,s22:-14},
-  {id:"VTSAX",n:"Vanguard Total Market",t:"Mutual Fund",sec:"Diversified",ret:23.8,vol:17,beta:1.0,sh:1.18,yld:1.4,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-51,s20:-34,s22:-20},
-  {id:"VBTLX",n:"Vanguard Total Bond",t:"Mutual Fund",sec:"Fixed Income",ret:4.2,vol:5,beta:.04,sh:.41,yld:4.2,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Income"],rb:[1,2],hm:1,s08:5,s20:7,s22:-13},
-  {id:"VWELX",n:"Vanguard Wellington",t:"Mutual Fund",sec:"Balanced",ret:13.2,vol:12,beta:.65,sh:.71,yld:2.3,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Balanced","Income"],rb:[2,3],hm:3,s08:-28,s20:-18,s22:-16},
-  {id:"PIMIX",n:"PIMCO Income Inst.",t:"Mutual Fund",sec:"Fixed Income",ret:9.2,vol:7,beta:.22,sh:.79,yld:7.1,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Income"],rb:[2,3],hm:1,s08:-8,s20:-4,s22:-10},
-  {id:"FCNTX",n:"Fidelity Contrafund",t:"Mutual Fund",sec:"Growth",ret:28.1,vol:22,beta:1.07,sh:.84,yld:.4,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Growth"],rb:[3,5],hm:5,s08:-49,s20:-33,s22:-27},
-  {id:"DODGX",n:"Dodge & Cox Stock",t:"Mutual Fund",sec:"Value",ret:19.8,vol:22,beta:.98,sh:.76,yld:1.8,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Balanced","Growth"],rb:[2,4],hm:5,s08:-45,s20:-37,s22:-3},
-  {id:"VDIGX",n:"Vanguard Dividend Growth",t:"Mutual Fund",sec:"Dividend",ret:17.4,vol:14,beta:.81,sh:.82,yld:1.9,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Income","Balanced"],rb:[2,3],hm:3,s08:-35,s20:-23,s22:-8},
-  {id:"SPY_CC",n:"Covered Call Strategy",t:"Option",sec:"Derivatives",ret:14.2,vol:10,beta:.62,sh:1.08,yld:8.2,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Income","Balanced"],rb:[3,5],hm:1,s08:-28,s20:-18,s22:-12},
-  {id:"PUTSPRD",n:"Put Spread Hedge",t:"Option",sec:"Derivatives",ret:4.2,vol:8,beta:-.42,sh:.44,yld:0,sig:"Hold",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation"],rb:[3,5],hm:1,s08:32,s20:28,s22:14},
-  {id:"GC_F",n:"Gold Futures",t:"Futures",sec:"Commodities",ret:14.8,vol:16,beta:-.12,sh:.62,yld:0,sig:"Buy",rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Balanced"],rb:[3,5],hm:1,s08:5,s20:22,s22:-1},
-  {id:"O",n:"Realty Income (REIT)",t:"REIT",sec:"Real Estate",ret:9.2,vol:18,beta:.72,sh:.52,yld:5.8,sig:"Hold",rsi:47,macd:"Bearish",tgt:60,stop:53,goals:["Income"],rb:[2,4],hm:3,s08:-42,s20:-22,s22:-26},
-  {id:"PLD",n:"Prologis (REIT)",t:"REIT",sec:"Real Estate",ret:14.2,vol:24,beta:.92,sh:.68,yld:2.8,sig:"Buy",rsi:54,macd:"Neutral",tgt:125,stop:108,goals:["Balanced","Income"],rb:[2,4],hm:3,s08:-62,s20:-28,s22:-32},
+  {id:"AAPL",n:"Apple Inc.",t:"Stock",sec:"Technology",ret:24.8,vol:28,beta:1.24,sh:1.31,yld:.5,rsi:61,macd:"Bullish",tgt:235,stop:188,goals:["Growth","Balanced"],rb:[2,5],hm:3,s08:-54,s20:-32,s22:-27},
+  {id:"MSFT",n:"Microsoft Corp.",t:"Stock",sec:"Technology",ret:18.2,vol:26,beta:.91,sh:1.42,yld:.7,rsi:58,macd:"Bullish",tgt:480,stop:390,goals:["Growth","Balanced"],rb:[2,5],hm:3,s08:-44,s20:-28,s22:-29},
+  {id:"NVDA",n:"NVIDIA Corp.",t:"Stock",sec:"Technology",ret:62.4,vol:58,beta:1.89,sh:1.74,yld:0,rsi:72,macd:"Bullish",tgt:1000,stop:810,goals:["Growth"],rb:[4,5],hm:5,s08:-72,s20:-42,s22:-66},
+  {id:"META",n:"Meta Platforms",t:"Stock",sec:"Technology",ret:64.2,vol:44,beta:1.28,sh:1.38,yld:.4,rsi:68,macd:"Bullish",tgt:620,stop:460,goals:["Growth"],rb:[3,5],hm:3,s08:-55,s20:-35,s22:-64},
+  {id:"AMZN",n:"Amazon.com",t:"Stock",sec:"Technology",ret:42.1,vol:32,beta:1.33,sh:1.18,yld:0,rsi:64,macd:"Bullish",tgt:220,stop:165,goals:["Growth","Balanced"],rb:[3,5],hm:3,s08:-45,s20:-18,s22:-50},
+  {id:"GOOGL",n:"Alphabet Inc.",t:"Stock",sec:"Technology",ret:35.8,vol:28,beta:1.12,sh:1.22,yld:0,rsi:59,macd:"Neutral",tgt:200,stop:155,goals:["Growth","Balanced"],rb:[3,5],hm:3,s08:-55,s20:-30,s22:-40},
+  {id:"JPM",n:"JPMorgan Chase",t:"Stock",sec:"Financials",ret:31.2,vol:29,beta:1.08,sh:.98,yld:2.4,rsi:55,macd:"Neutral",tgt:220,stop:182,goals:["Balanced","Income"],rb:[2,5],hm:3,s08:-68,s20:-38,s22:-18},
+  {id:"JNJ",n:"Johnson & Johnson",t:"Stock",sec:"Healthcare",ret:3.1,vol:16,beta:.62,sh:.61,yld:3.4,rsi:44,macd:"Bearish",tgt:165,stop:148,goals:["Income","Preservation"],rb:[1,3],hm:1,s08:-22,s20:-14,s22:-6},
+  {id:"XOM",n:"Exxon Mobil",t:"Stock",sec:"Energy",ret:12.4,vol:25,beta:1.22,sh:.72,yld:3.8,rsi:51,macd:"Neutral",tgt:125,stop:108,goals:["Income","Balanced"],rb:[2,4],hm:3,s08:-51,s20:-44,s22:52},
+  {id:"COST",n:"Costco Wholesale",t:"Stock",sec:"Consumer",ret:29.8,vol:18,beta:.82,sh:1.42,yld:.6,rsi:63,macd:"Bullish",tgt:920,stop:795,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-28,s20:-12,s22:-8},
+  {id:"LLY",n:"Eli Lilly & Co.",t:"Stock",sec:"Healthcare",ret:54.8,vol:32,beta:.48,sh:1.62,yld:.7,rsi:66,macd:"Bullish",tgt:920,stop:740,goals:["Growth","Balanced"],rb:[3,5],hm:5,s08:-20,s20:-12,s22:-8},
+  {id:"AVGO",n:"Broadcom Inc.",t:"Stock",sec:"Technology",ret:84.2,vol:42,beta:1.44,sh:1.88,yld:1.2,rsi:70,macd:"Bullish",tgt:1800,stop:1380,goals:["Growth"],rb:[4,5],hm:5,s08:-55,s20:-38,s22:-42},
+  {id:"PG",n:"Procter & Gamble",t:"Stock",sec:"Consumer",ret:11.2,vol:14,beta:.52,sh:.82,yld:2.4,rsi:48,macd:"Neutral",tgt:175,stop:158,goals:["Income","Preservation","Balanced"],rb:[1,3],hm:1,s08:-18,s20:-10,s22:-8},
+  {id:"BRK_B",n:"Berkshire Hathaway B",t:"Stock",sec:"Financials",ret:22.1,vol:21,beta:.84,sh:1.02,yld:0,rsi:54,macd:"Neutral",tgt:460,stop:395,goals:["Balanced","Growth"],rb:[2,4],hm:3,s08:-36,s20:-22,s22:-4},
+  {id:"MA",n:"Mastercard Inc.",t:"Stock",sec:"Financials",ret:19.8,vol:22,beta:1.08,sh:1.12,yld:.6,rsi:57,macd:"Bullish",tgt:490,stop:415,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-58,s20:-32,s22:-20},
+  {id:"SPY",n:"SPDR S&P 500 ETF",t:"ETF",sec:"Diversified",ret:24.2,vol:17,beta:1.0,sh:1.21,yld:1.3,rsi:60,macd:"Bullish",tgt:560,stop:498,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-50,s20:-34,s22:-19},
+  {id:"QQQ",n:"Invesco QQQ ETF",t:"ETF",sec:"Technology",ret:31.4,vol:22,beta:1.18,sh:1.28,yld:.5,rsi:63,macd:"Bullish",tgt:480,stop:415,goals:["Growth"],rb:[3,5],hm:3,s08:-52,s20:-28,s22:-33},
+  {id:"GLD",n:"SPDR Gold Shares",t:"ETF",sec:"Commodities",ret:14.8,vol:15,beta:-.12,sh:.62,yld:0,rsi:62,macd:"Bullish",tgt:320,stop:285,goals:["Preservation","Balanced"],rb:[1,4],hm:1,s08:5,s20:24,s22:-2},
+  {id:"EFA",n:"iShares MSCI EAFE",t:"ETF",sec:"International",ret:18.2,vol:18,beta:.84,sh:.88,yld:2.8,rsi:55,macd:"Neutral",tgt:85,stop:72,goals:["Balanced","Growth"],rb:[2,4],hm:3,s08:-44,s20:-28,s22:-22},
+  {id:"HYG",n:"iShares HY Corp Bond ETF",t:"ETF",sec:"Fixed Income",ret:10.8,vol:9,beta:.48,sh:.82,yld:6.8,rsi:52,macd:"Neutral",tgt:80,stop:74,goals:["Income"],rb:[2,4],hm:1,s08:-32,s20:-20,s22:-14},
+  {id:"VNQ",n:"Vanguard Real Estate ETF",t:"ETF",sec:"Real Estate",ret:8.2,vol:22,beta:.88,sh:.48,yld:4.2,rsi:46,macd:"Bearish",tgt:90,stop:78,goals:["Income"],rb:[2,4],hm:3,s08:-68,s20:-38,s22:-28},
+  {id:"US10Y",n:"US 10-Year Treasury",t:"Bond",sec:"Fixed Income",ret:4.2,vol:8,beta:-.18,sh:.42,yld:4.4,rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Income"],rb:[1,2],hm:1,s08:18,s20:18,s22:-18},
+  {id:"US2Y",n:"US 2-Year Treasury",t:"Bond",sec:"Fixed Income",ret:5.2,vol:2,beta:-.04,sh:1.22,yld:5.2,rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation"],rb:[1,2],hm:1,s08:8,s20:4,s22:-4},
+  {id:"CORP_HY",n:"HY Corporate Bonds",t:"Bond",sec:"Fixed Income",ret:10.2,vol:11,beta:.42,sh:.74,yld:8.2,rsi:null,macd:null,tgt:null,stop:null,goals:["Income"],rb:[2,4],hm:1,s08:-28,s20:-18,s22:-14},
+  {id:"MUNI",n:"Municipal Bond Index",t:"Bond",sec:"Fixed Income",ret:3.8,vol:5,beta:-.02,sh:.72,yld:3.6,rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Income"],rb:[1,3],hm:1,s08:-8,s20:-4,s22:-12},
+  {id:"TIPS",n:"TIPS Bond Index",t:"Bond",sec:"Fixed Income",ret:2.8,vol:6,beta:-.08,sh:.34,yld:2.8,rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation"],rb:[1,2],hm:1,s08:-4,s20:8,s22:-14},
+  {id:"VTSAX",n:"Vanguard Total Market",t:"Mutual Fund",sec:"Diversified",ret:23.8,vol:17,beta:1.0,sh:1.18,yld:1.4,rsi:null,macd:null,tgt:null,stop:null,goals:["Growth","Balanced"],rb:[2,4],hm:3,s08:-51,s20:-34,s22:-20},
+  {id:"VBTLX",n:"Vanguard Total Bond",t:"Mutual Fund",sec:"Fixed Income",ret:4.2,vol:5,beta:.04,sh:.41,yld:4.2,rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Income"],rb:[1,2],hm:1,s08:5,s20:7,s22:-13},
+  {id:"VWELX",n:"Vanguard Wellington",t:"Mutual Fund",sec:"Balanced",ret:13.2,vol:12,beta:.65,sh:.71,yld:2.3,rsi:null,macd:null,tgt:null,stop:null,goals:["Balanced","Income"],rb:[2,3],hm:3,s08:-28,s20:-18,s22:-16},
+  {id:"PIMIX",n:"PIMCO Income Inst.",t:"Mutual Fund",sec:"Fixed Income",ret:9.2,vol:7,beta:.22,sh:.79,yld:7.1,rsi:null,macd:null,tgt:null,stop:null,goals:["Income"],rb:[2,3],hm:1,s08:-8,s20:-4,s22:-10},
+  {id:"FCNTX",n:"Fidelity Contrafund",t:"Mutual Fund",sec:"Growth",ret:28.1,vol:22,beta:1.07,sh:.84,yld:.4,rsi:null,macd:null,tgt:null,stop:null,goals:["Growth"],rb:[3,5],hm:5,s08:-49,s20:-33,s22:-27},
+  {id:"DODGX",n:"Dodge & Cox Stock",t:"Mutual Fund",sec:"Value",ret:19.8,vol:22,beta:.98,sh:.76,yld:1.8,rsi:null,macd:null,tgt:null,stop:null,goals:["Balanced","Growth"],rb:[2,4],hm:5,s08:-45,s20:-37,s22:-3},
+  {id:"VDIGX",n:"Vanguard Dividend Growth",t:"Mutual Fund",sec:"Dividend",ret:17.4,vol:14,beta:.81,sh:.82,yld:1.9,rsi:null,macd:null,tgt:null,stop:null,goals:["Income","Balanced"],rb:[2,3],hm:3,s08:-35,s20:-23,s22:-8},
+  {id:"SPY_CC",n:"Covered Call Strategy",t:"Option",sec:"Derivatives",ret:14.2,vol:10,beta:.62,sh:1.08,yld:8.2,rsi:null,macd:null,tgt:null,stop:null,goals:["Income","Balanced"],rb:[3,5],hm:1,s08:-28,s20:-18,s22:-12},
+  {id:"PUTSPRD",n:"Put Spread Hedge",t:"Option",sec:"Derivatives",ret:4.2,vol:8,beta:-.42,sh:.44,yld:0,rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation"],rb:[3,5],hm:1,s08:32,s20:28,s22:14},
+  {id:"GC_F",n:"Gold Futures",t:"Futures",sec:"Commodities",ret:14.8,vol:16,beta:-.12,sh:.62,yld:0,rsi:null,macd:null,tgt:null,stop:null,goals:["Preservation","Balanced"],rb:[3,5],hm:1,s08:5,s20:22,s22:-1},
+  {id:"O",n:"Realty Income (REIT)",t:"REIT",sec:"Real Estate",ret:9.2,vol:18,beta:.72,sh:.52,yld:5.8,rsi:47,macd:"Bearish",tgt:60,stop:53,goals:["Income"],rb:[2,4],hm:3,s08:-42,s20:-22,s22:-26},
+  {id:"PLD",n:"Prologis (REIT)",t:"REIT",sec:"Real Estate",ret:14.2,vol:24,beta:.92,sh:.68,yld:2.8,rsi:54,macd:"Neutral",tgt:125,stop:108,goals:["Balanced","Income"],rb:[2,4],hm:3,s08:-62,s20:-28,s22:-32},
 ];
 
 // ASSETS starts as fallback, gets replaced when backend screening completes
@@ -739,7 +768,6 @@ function Discovery({profile,ports,onAdd}){
     const types=new Set(ASSETS.map(a=>a.t));
     return["All",...Array.from(types).sort()];
   },[ASSETS.length]);
-  const SIG={"Strong Buy":"#1D9E75","Buy":"#3B6D11","Hold":"#f59e0b","Sell":"#ef4444"};
   // Re-rank assets when factor weights change
   const rows=ASSETS.map(a=>{
     let fit=a.fit||fitScore(a,profile);
@@ -830,8 +858,8 @@ function Discovery({profile,ports,onAdd}){
           TH("pe","P/E"),e("th",null,"NEXT EARNINGS"),
           e("th",null,"DIV GROWTH"),TH("debtEq","DEBT/EQ"),TH("revGrowth","REV GROWTH"),
           e("th",null,"RSI"),
-          e("th",null,e("span",{style:{display:"inline-flex",alignItems:"center",gap:4}},"SIGNAL",
-            e("span",{onClick:(ev)=>{ev.stopPropagation();setSignalInfo(true);},title:"What does this signal measure?",style:{cursor:"pointer",fontSize:11,color:"#818cf8",fontWeight:"normal"}},"ⓘ")
+          e("th",null,e("span",{style:{display:"inline-flex",alignItems:"center",gap:4}},"SHARPE (1Y)",
+            e("span",{onClick:(ev)=>{ev.stopPropagation();setSignalInfo(true);},title:"What does Sharpe (1Y) measure?",style:{cursor:"pointer",fontSize:11,color:"#818cf8",fontWeight:"normal"}},"ⓘ")
           )),
           e("th",null,"ADD TO")
         )),
@@ -867,21 +895,23 @@ function Discovery({profile,ports,onAdd}){
             e("td",{style:{color:a.debtEq==null?"#64748b":a.debtEq<0.5?"#1D9E75":a.debtEq<=1.5?"#f59e0b":"#ef4444"}},a.debtEq==null?"—":a.debtEq.toFixed(2)),
             e("td",{style:{color:a.revGrowth==null?"#64748b":a.revGrowth>5?"#1D9E75":a.revGrowth>=0?"#f59e0b":"#ef4444"}},a.revGrowth==null?"—":(a.revGrowth>0?"+":"")+a.revGrowth.toFixed(1)+"%"),
             e("td",{style:{color:a.rsi>70?"#ef4444":a.rsi<30?"#1D9E75":"#94a3b8"}},a.rsi||"—"),
-            e("td",{style:{color:SIG[a.sig]||"#f59e0b",fontSize:10,fontWeight:"bold"}},a.sig),
+            (()=>{const c=sharpeCell(a);return e("td",{style:{fontSize:11,fontWeight:"bold",color:"#cbd5e1"}},e("span",{title:c.tip},c.text));})(),
             e("td",null,e("div",{style:{display:"flex",gap:3}},
               pks.map(pn=>{const inP=ports[pn][a.id]!==undefined;return e("button",{key:pn,className:"btn btn-xs "+(inP?"btn-s":"btn-p"),onClick:ev=>{ev.stopPropagation();onAdd(pn,a.id);}},(inP?"✓":"+")+(" "+pn));})
             ))
           );
         })),
-        e("tfoot",null,e("tr",null,e("td",{colSpan:21,style:{padding:"8px 6px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Fit scores rate each security on its own — they don't know what you already hold. Two top-ranked names can be near-duplicates of each other or of your portfolio. Diversification happens in the optimizer, not in this list.")))
+        e("tfoot",null,
+          e("tr",null,e("td",{colSpan:21,style:{padding:"8px 6px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Fit scores rate each security on its own — they don't know what you already hold. Two top-ranked names can be near-duplicates of each other or of your portfolio. Diversification happens in the optimizer, not in this list.")),
+          e("tr",null,e("td",{colSpan:21,style:{padding:"0 6px 8px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Sharpe ratio: past-year return above the risk-free rate, per unit of volatility. A historical description, not a forecast or recommendation.")))
       )
     ),
     openTicker&&e(TickerChart,{ticker:openTicker,name:(ASSETS.find(x=>x.id===openTicker)||{}).n,onClose:()=>setOpenTicker(null)}),
     signalInfo&&e("div",{onClick:()=>setSignalInfo(false),style:{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:1200,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
       e("div",{onClick:(ev)=>ev.stopPropagation(),style:{background:"#0c1220",border:"1px solid rgba(99,102,241,.25)",borderRadius:12,padding:"20px 22px",maxWidth:440,position:"relative",boxShadow:"0 20px 60px rgba(0,0,0,.5)"}},
         e("button",{onClick:()=>setSignalInfo(false),title:"Close",style:{position:"absolute",top:8,right:10,background:"none",border:"none",color:"#94a3b8",fontSize:18,cursor:"pointer",padding:"2px 8px",lineHeight:1}},"✕"),
-        e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:10,letterSpacing:.5}},"WHAT THE SIGNAL MEASURES"),
-        e("div",{style:{fontSize:13,color:"#cbd5e1",lineHeight:1.6}},"This signal comes from fundamental factor scoring (momentum, quality, value, volatility, yield) matched to your profile. It measures long-term attractiveness. The Indicator Consensus inside each ticker's chart measures short-term technical conditions. They can disagree — a stock can be fundamentally attractive while technically weak, or vice versa. Disagreement is information, not an error.")
+        e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:10,letterSpacing:.5}},"WHAT SHARPE (1Y) MEASURES"),
+        e("div",{style:{fontSize:13,color:"#cbd5e1",lineHeight:1.6}},"This column is the security's Sharpe ratio over the past year: (1-year return − risk-free rate) ÷ annualized volatility. The band word — High, Moderate, Low, Minimal, or Negative — just describes where that number falls. It is a backward-looking description of realized risk-adjusted return over the last 12 months only. It says nothing about the company's valuation, quality, or future returns, and it is not a forecast or a recommendation. The Indicator Consensus inside each ticker's chart measures short-term technical conditions and can disagree with this number — disagreement is information, not an error.")
       )
     )
   );
@@ -1236,9 +1266,12 @@ function TickerChart({ticker,name,onClose}){
     const active=families.filter(f=>f.active);
     const bull=active.filter(f=>f.vote==="bullish").length;
     const bear=active.filter(f=>f.vote==="bearish").length;
-    if(bull-bear>=2)return{label:"Buy",color:"#1D9E75"};
-    if(bear-bull>=2)return{label:"Sell",color:"#ef4444"};
-    return{label:"Hold",color:"#f59e0b"};
+    // Descriptive tilt, not a verdict (INTERFACE_VERDICTS_SPEC.md Amendment 2).
+    // Colors describe indicator state, not a buy/sell call.
+    const total=active.length;
+    if(bull-bear>=2)return{label:"Bullish tilt",detail:"("+bull+" of "+total+")",color:"#1D9E75"};
+    if(bear-bull>=2)return{label:"Bearish tilt",detail:"("+bear+" of "+total+")",color:"#ef4444"};
+    return{label:"Mixed",detail:"("+bull+"-"+bear+")",color:"#f59e0b"};
   },[families]);
 
   const chartW=740,chartH=220,pad=36;
@@ -1288,7 +1321,7 @@ function TickerChart({ticker,name,onClose}){
       e("g",{onClick:()=>setShowConsensus(true),style:{cursor:"pointer"}},
         e("rect",{x:pad-4,y:8,width:activeFamilyCount>0?320:300,height:activeFamilyCount>0?80:26,fill:"rgba(11,15,30,.82)",rx:6,stroke:"rgba(99,102,241,.2)",strokeWidth:".5"}),
         e("text",{x:pad+2,y:22,fontSize:9,fill:"#64748b"},activeFamilyCount>0?"INDICATOR CONSENSUS":"INDICATOR CONSENSUS · Turn on indicators"),
-        activeFamilyCount>0&&e("text",{x:pad+2,y:42,fontSize:18,fill:consensus.color,fontWeight:"bold"},consensus.label.toUpperCase()),
+        activeFamilyCount>0&&e("text",{x:pad+2,y:42,fontSize:15,fill:consensus.color,fontWeight:"bold"},consensus.label+" "+consensus.detail),
         activeFamilyCount>0&&e("text",{x:pad+2,y:54,fontSize:9,fill:"#64748b"},"Based on "+activeFamilyCount+" indicator famil"+(activeFamilyCount===1?"y":"ies")),
         activeFamilyCount>0&&e("text",{x:pad+2,y:66,fontSize:8,fill:"#64748b",fontStyle:"italic"},"Not a trade recommendation"),
         activeFamilyCount>0&&e("text",{x:pad+2,y:78,fontSize:8,fill:"#475569",fontStyle:"italic"},"Technical view · may differ from Discovery's fundamental signal")
@@ -2149,12 +2182,17 @@ function TradeDeck({weights,profile}){
   if(!tickers.length)return e("div",{className:"card",style:{textAlign:"center",padding:32}},e("div",{style:{color:"#475569"}},"Build a portfolio to see trade recommendations."));
   const SIG_ACT={"Strong Buy":"buy","Buy":"buy","Hold":"hold","Sell":"sell","Strong Sell":"sell"};
   const ACT={buy:{cls:"act-buy",l:"BUY"},sell:{cls:"act-sell",l:"SELL"},hold:{cls:"act-hold",l:"HOLD"}};
+  // TEMP SHIM — Trade Desk remediation pending, see TRADE_DESK_SPEC.md. Reproduces
+  // the retired Sharpe→verdict thresholds so this (deferred) desk behaves exactly as
+  // before now that a.sig holds a descriptive Sharpe band instead of a verdict label.
+  const legacyVerdict=sh=>sh>=1.5?"Strong Buy":sh>=1?"Buy":sh>=.5?"Hold":"Sell";
   const trades=tickers.map(k=>{
     const a=ASSETS.find(u=>u.id===k)||{};const fit=fitScore(a,profile);
-    const act=SIG_ACT[a.sig]||"hold";
+    const _sig=legacyVerdict(a.sh);  // TEMP SHIM (see above)
+    const act=SIG_ACT[_sig]||"hold";
     const order=act==="buy"&&a.rsi&&a.rsi>65?"Limit":act==="buy"?"Market":act==="sell"?"Stop-Limit":"Monitor";
     const hor=a.vol>35?"swing (1-4 wks)":a.vol>20?"medium (1-3 mo)":"core (3-12 mo)";
-    const rationale=act==="buy"?a.sig+" signal · RSI "+(a.rsi||"N/A")+" · MACD "+(a.macd||"N/A")+" · Sharpe "+a.sh+" · Fit "+fit+"/100":act==="sell"?"Weak signal · Vol "+a.vol+"% · Sharpe "+a.sh:"Neutral — hold, reassess on catalyst or earnings";
+    const rationale=act==="buy"?_sig+" signal · RSI "+(a.rsi||"N/A")+" · MACD "+(a.macd||"N/A")+" · Sharpe "+a.sh+" · Fit "+fit+"/100":act==="sell"?"Weak signal · Vol "+a.vol+"% · Sharpe "+a.sh:"Neutral — hold, reassess on catalyst or earnings";
     const limitEntry=act==="buy"&&a.rsi&&a.rsi>65&&a.tgt?+(a.tgt*.88).toFixed(2):null;
     return{ticker:k,type:a.t,act,order,stop:a.stop,tgt:a.tgt,alloc:weights[k]+"%",hor,rationale,fit,limitEntry};
   }).sort((a,b)=>b.fit-a.fit);
@@ -2218,9 +2256,11 @@ function Compare({ports}){
   );
 }
 
-// ── AI Adviser ────────────────────────────────────────────────────────────────
+// ── Ask Quantex (educational explainer) ──────────────────────────────────────
+// NOTE: component identifier `Advisor` retained (internal, never rendered) — see
+// INTERFACE_VERDICTS_SPEC.md Part B advis-sweep classification (REPORTED-IDENTIFIER).
 function Advisor({profile,ports,activePort}){
-  const[msgs,setMsgs]=useState([{r:"ai",t:"Welcome to Quantex AI — powered by Claude.\n\nComplete ① PROFILE first. Assets in Discovery are then ranked by Fit Score for your specific profile, goal, and time horizon.\n\nAsk me anything about your portfolio, risk, or strategy."}]);
+  const[msgs,setMsgs]=useState([{r:"ai",t:"Welcome to Quantex AI — powered by Claude.\n\nComplete ① PROFILE first. Assets in Discovery are then ranked by Fit Score for your specific profile, goal, and time horizon.\n\nAsk me how any metric on this screen is computed or what it means. I explain the analytics — I don't recommend what to buy, sell, or hold."}]);
   const[inp,setInp]=useState("");
   const[loading,setLoading]=useState(false);
   const[apiKey,setApiKey]=useState(()=>{try{return localStorage.getItem("qx_api_key")||"";}catch(e){return"";}});
@@ -2236,7 +2276,7 @@ function Advisor({profile,ports,activePort}){
 
   const askClaude=async(msg)=>{
     setLoading(true);
-    const sysPrompt="You are Quantex AI, a professional financial adviser assistant. Current investor context:\n"+getCtx()+"\n\nBe concise (under 200 words). Reference actual portfolio numbers when relevant. Note this is analytical guidance, not regulated financial advice. Plain text only, no markdown.";
+    const sysPrompt="You are an educational explainer for Quantex's analytics. You explain what displayed metrics mean and how they are computed. You never recommend buying, selling, holding, or allocating to any security or strategy, never answer 'what should I do' questions with a course of action, and redirect such questions to how the relevant concept works. You are not a financial adviser and must say so if asked.\n\nCurrent investor context:\n"+getCtx()+"\n\nBe concise (under 200 words). Reference actual portfolio numbers when relevant to explain how a metric is computed. Plain text only, no markdown.";
     try{
       // Server proxy (Replicate-backed). Direct-API fallback was removed when the
       // backend switched from direct Anthropic to Replicate — the ⚙ icon's
@@ -2252,10 +2292,11 @@ function Advisor({profile,ports,activePort}){
   };
 
   const send=()=>{if(!inp.trim()||loading)return;const u=inp.trim();setInp("");setMsgs(m=>[...m,{r:"usr",t:u}]);askClaude(u);};
-  const QUICK=["Analyze my portfolio","Explain my Sharpe ratio","What should I hedge?","Best assets for my profile?","Should I rebalance?"];
+  const QUICK=["Walk me through my portfolio's key metrics","Explain my Sharpe ratio","How does hedging work for a portfolio like this?","How does the Fit Score rank assets for my profile?","What does rebalancing do, and what are its tradeoffs?"];
 
   return e(React.Fragment,null,
-    e("div",{className:"adv-hdr"},"AI ADVISER",e("div",{style:{display:"flex",alignItems:"center",gap:6}},e("span",{className:"adv-badge"},apiKey?"Claude ✓":"No Key"),e("button",{onClick:()=>setShowKey(!showKey),style:{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:11}},"⚙"))),
+    e("div",{className:"adv-hdr"},"Ask Quantex",e("div",{style:{display:"flex",alignItems:"center",gap:6}},e("span",{className:"adv-badge"},apiKey?"Claude ✓":"No Key"),e("button",{onClick:()=>setShowKey(!showKey),style:{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:11}},"⚙"))),
+    e("div",{style:{padding:"0 10px 6px",fontSize:10,color:"#64748b",fontStyle:"italic",background:"#0a0e1a"}},"Explains what the analytics are showing — educational, not advice."),
     showKey&&e("div",{style:{padding:"6px 10px",background:"#06090f",borderBottom:"1px solid #1a2540",fontSize:10}},
       e("div",{style:{color:"#475569",marginBottom:4}},"Anthropic API Key",e("span",{style:{color:"#334155",marginLeft:4}},"(stored locally, never sent to any server except Anthropic)")),
       e("input",{type:"password",value:apiKey,onChange:ev=>setApiKey(ev.target.value),placeholder:"sk-ant-...",style:{width:"100%",padding:"4px 7px",background:"#080d1a",border:"1px solid #1a2540",borderRadius:5,color:"#cbd5e1",fontSize:10,fontFamily:"monospace"}})
@@ -2267,9 +2308,10 @@ function Advisor({profile,ports,activePort}){
     ),
     e("div",{className:"quick-btns"},QUICK.map(q=>e("button",{key:q,className:"q-btn",disabled:loading,onClick:()=>{setMsgs(m=>[...m,{r:"usr",t:q}]);askClaude(q);}},q))),
     e("div",{className:"adv-input-row"},
-      e("input",{className:"adv-input",value:inp,onChange:ev=>setInp(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&!loading&&send(),placeholder:"Ask anything...",disabled:loading}),
+      e("input",{className:"adv-input",value:inp,onChange:ev=>setInp(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&!loading&&send(),placeholder:"Ask how a metric works...",disabled:loading}),
       e("button",{className:"adv-send",onClick:send,disabled:loading||!inp.trim()},loading?"…":"ASK")
-    )
+    ),
+    e("div",{style:{padding:"6px 10px",fontSize:9,color:"#475569",fontStyle:"italic",borderTop:"1px solid #1a2540",lineHeight:1.4}},"Educational explanations only. Nothing here is investment advice or a recommendation.")
   );
 }
 
@@ -3151,13 +3193,13 @@ function LoginGate({children}){
                     e("span",{style:{fontSize:10,color:"#64748b",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},"Microsoft Corp.")
                   ),
                   e("div",{style:{display:"flex",alignItems:"center",gap:6,flexShrink:0}},
-                    e("span",{style:{fontSize:8,color:"#64748b",letterSpacing:.5}},"SIGNAL"),
-                    e("span",{style:{color:"#1D9E75",fontSize:11,fontWeight:"bold"}},"Strong Buy")
+                    e("span",{style:{fontSize:8,color:"#64748b",letterSpacing:.5}},"SHARPE (1Y)"),
+                    e("span",{style:{color:"#cbd5e1",fontSize:11,fontWeight:"bold"}},"1.42 · Moderate")
                   )
                 ),
                 e("div",{style:{background:"rgba(11,15,30,.82)",border:"1px solid rgba(99,102,241,.2)",borderRadius:6,padding:"8px 10px"}},
                   e("div",{style:{fontSize:8,color:"#64748b",marginBottom:4}},"INDICATOR CONSENSUS"),
-                  e("div",{style:{fontSize:18,color:"#f59e0b",fontWeight:"bold",lineHeight:1}},"HOLD"),
+                  e("div",{style:{fontSize:16,color:"#f59e0b",fontWeight:"bold",lineHeight:1}},"Mixed (2-2)"),
                   e("div",{style:{fontSize:8,color:"#64748b",marginTop:4}},"Based on 4 indicator families"),
                   e("div",{style:{fontSize:8,color:"#475569",fontStyle:"italic",marginTop:2}},"Technical view · may differ from Discovery's fundamental signal")
                 )
@@ -3207,7 +3249,7 @@ function LoginGate({children}){
         e("button",{onClick:()=>setShowForm(false),title:"Close (Esc)",style:{position:"absolute",top:10,right:12,background:"none",border:"none",color:"#94a3b8",fontSize:20,cursor:"pointer",padding:"2px 8px",lineHeight:1,zIndex:2}},"✕"),
         e("div",{className:"login-card"},
           e("div",{className:"login-logo"},"QUANTEX"),
-          e("div",{className:"login-sub"},"Portfolio Intelligence Platform",e("br",null),"CFA Exam Prep · Paper Trading · AI Advisory"),
+          e("div",{className:"login-sub"},"Portfolio Intelligence Platform",e("br",null),"CFA Exam Prep · Paper Trading · Ask Quantex"),
           mode==="signup"&&e("input",{className:"login-field",placeholder:"Full Name",value:name,onChange:ev=>setName(ev.target.value)}),
           e("input",{className:"login-field",placeholder:"Email",type:"email",value:email,onChange:ev=>setEmail(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&submit()}),
           e("input",{className:"login-field",placeholder:"Password",type:"password",value:pass,onChange:ev=>setPass(ev.target.value),onKeyDown:ev=>ev.key==="Enter"&&submit()}),

@@ -623,6 +623,20 @@ async def search_tickers(req: SearchRequest):
     return results
 
 
+def _sharpe_band(sharpe: float) -> str:
+    """Descriptive Sharpe (1Y) band — factual replacement for the retired
+    verdict labels (INTERFACE_VERDICTS_SPEC.md A2 / Amendment 1). Closed set."""
+    if sharpe >= 1.5:
+        return "High"
+    if sharpe >= 1.0:
+        return "Moderate"
+    if sharpe >= 0.5:
+        return "Low"
+    if sharpe >= 0.0:
+        return "Minimal"
+    return "Negative"
+
+
 @app.post("/api/ticker/add", response_model=TickerAddResponse)
 async def add_ticker(req: TickerAddRequest):
     """Fetch a single ticker via yfinance. Lenient validation — accepts any symbol
@@ -697,14 +711,7 @@ async def add_ticker(req: TickerAddRequest):
     quote_type = (info.get("quoteType") or "").upper()
     t_type = "ETF" if quote_type == "ETF" else "Mutual Fund" if quote_type == "MUTUALFUND" else "Stock"
 
-    if sharpe >= 1.5:
-        sig = "Strong Buy"
-    elif sharpe >= 1.0:
-        sig = "Buy"
-    elif sharpe >= 0.5:
-        sig = "Hold"
-    else:
-        sig = "Sell"
+    sig = _sharpe_band(sharpe)  # Sharpe band, not a verdict (INTERFACE_VERDICTS_SPEC.md Amendment 1)
 
     response = TickerAddResponse(
         id=symbol,
@@ -2025,7 +2032,7 @@ async def ai_chat(body: dict):
     if not token:
         raise HTTPException(status_code=503, detail="AI features require a REPLICATE_API_TOKEN environment variable on the server. Set it in your Render dashboard under Environment.")
 
-    system = body.get("system", "You are Quantex AI, a professional financial adviser assistant.")
+    system = body.get("system", "You are an educational explainer for Quantex's analytics. You explain what displayed metrics mean and how they are computed. You never recommend buying, selling, holding, or allocating to any security or strategy, never answer 'what should I do' questions with a course of action, and redirect such questions to how the relevant concept works. You are not a financial adviser and must say so if asked.")
     message = body.get("message", "")
     if not message:
         raise HTTPException(status_code=400, detail="Message is required")

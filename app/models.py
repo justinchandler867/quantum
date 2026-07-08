@@ -611,7 +611,7 @@ class TickerAddResponse(BaseModel):
     beta: float = 1.0
     sh: float = 0.0
     yld: float = 0.0
-    sig: str = "Hold"
+    sig: str = "—"  # Sharpe (1Y) band: High/Moderate/Low/Minimal/Negative (was verdict label)
     rsi: float | None = None
     macd: str | None = None
     tgt: float | None = None
