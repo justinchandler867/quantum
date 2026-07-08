@@ -532,6 +532,19 @@ function fitScore(asset,profile){
   return Math.min(100,Math.round(s));
 }
 
+// Discovery table row comparator. cmp is the ascending base (numeric diff or
+// locale compare); sd = -1 renders "↓" and MUST sort descending (best/highest
+// first), sd = +1 renders "↑" and sorts ascending. The previous inline form
+// inverted the numeric direction, so the default fit/"screen match" view showed
+// the WORST matches on top — see tests/test_discovery_sort.py.
+function cmpRows(a,b,sk,sd){
+  const av=a[sk],bv=b[sk];
+  const cmp=(typeof av==="string"||typeof bv==="string")
+    ? String(av==null?"":av).localeCompare(String(bv==null?"":bv))
+    : ((av||0)-(bv||0));
+  return sd===-1 ? -cmp : cmp;
+}
+
 const _cc={};
 function getCorr(a,b){
   const k=[a,b].sort().join("|");
@@ -863,7 +876,7 @@ function Discovery({profile,ports,onAdd}){
       fit=Math.max(0,Math.min(100,Math.round(customScore*20+60)));
     }
     return{...a,fit};
-  }).filter(a=>(tf==="All"||a.t===tf||a.sec===tf)&&(!search||a.id.toLowerCase().includes(search.toLowerCase())||a.n.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>{const av=a[sk],bv=b[sk];if(typeof av==="string"||typeof bv==="string")return sd*String(av==null?"":av).localeCompare(String(bv==null?"":bv));return sd*(bv||0)-sd*(av||0);});
+  }).filter(a=>(tf==="All"||a.t===tf||a.sec===tf)&&(!search||a.id.toLowerCase().includes(search.toLowerCase())||a.n.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>cmpRows(a,b,sk,sd));
   const hs=k=>{if(sk===k)setSd(d=>-d);else{setSk(k);setSd(-1);}};
   const TH=(f,l,tip)=>e("th",{onClick:()=>hs(f),title:tip||undefined},l+(sk===f?(sd===-1?"↓":"↑"):"↕"));
   const pks=Object.keys(ports);
