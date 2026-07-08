@@ -390,8 +390,12 @@ function mapScreened(item) {
   };
 }
 
-// Sharpe (1Y) descriptive band — factual replacement for the retired verdict
-// labels (see INTERFACE_VERDICTS_SPEC.md A2 / Amendment 1). Closed vocabulary.
+const SPY_REF_TICKER="SPY";  // market reference for the Sharpe (1Y) label (Amendment 3)
+
+// VESTIGIAL: produces the unused `sig` field only (INTERFACE_VERDICTS_SPEC.md
+// Amendment 1). Its High/Moderate/Low vocabulary is RETIRED from rendered
+// columns by Amendment 3 — no UI column reads this; kept solely so the API
+// data shape is unchanged.
 function sharpeBand(sh){
   if(sh==null||isNaN(sh))return null;
   if(sh>=1.5)return"High";
@@ -400,23 +404,40 @@ function sharpeBand(sh){
   if(sh>=0)return"Minimal";
   return"Negative";
 }
-// Cell text + factual tooltip for the SHARPE (1Y) column. The reconciling
-// formula is shown only when the row's inputs are internally consistent
-// (live/screened data); illustrative sample rows may not reconcile, so those
-// fall back to a factual (non-equation) tooltip rather than assert a false "=".
-function sharpeCell(a){
+// Correlation reference-point label (INTERFACE_VERDICTS_SPEC.md Amendment 3).
+// r = corr_normal (signed) with the selected portfolio `ref` (e.g. "A").
+function corrLabel(r, ref){
+  if(r==null||isNaN(r))return null;
+  if(r>=0.2)return"Moves with "+ref;
+  if(r<=-0.2)return"Moves against "+ref;
+  return"Unlinked";
+}
+// Sharpe (1Y) reference-point label (Amendment 3): compares to SPY over the
+// same window/method. isRef => this row IS the reference (SPY). cash = risk-free.
+// Returns null when the market comparison cannot be made honestly (no SPY ref).
+function sharpeMarketLabel(sh, spyRef, isRef){
+  if(isRef)return"Reference";
+  if(sh==null||isNaN(sh))return null;
+  if(sh<0)return"Lost vs cash";
+  if(spyRef==null||isNaN(spyRef))return null; // SPY reference unavailable — never invent
+  return sh>=spyRef?"Beat market":"Trailed market";
+}
+// Cell text + factual tooltip for the SHARPE (1Y) column. spyRef = SPY's own
+// 1Y Sharpe for this screen (row-set value, else derived, else null).
+function sharpeCell(a, spyRef){
   const RF=4.3; // risk-free %, matches backend RISK_FREE_RATE (config.py:54)
   if(a==null||a.sh==null||isNaN(a.sh)||a.vol==null||a.vol<=0)
     return{text:"—",tip:"Insufficient data"};
-  const band=sharpeBand(a.sh);
+  const num=a.sh.toFixed(2);
+  const isRef=(a.id===SPY_REF_TICKER);
+  const label=sharpeMarketLabel(a.sh,spyRef,isRef);
+  if(label==null)  // Sharpe >= 0 but SPY reference unavailable
+    return{text:num+" · —",tip:"1Y Sharpe "+num+". SPY reference unavailable — market comparison not shown."};
   let tip;
-  if(a.ret!=null&&Math.abs((a.ret-RF)/a.vol-a.sh)<0.05)
-    tip="1Y return "+a.ret.toFixed(1)+"% − rf "+RF+"%, ÷ vol "+a.vol.toFixed(1)+"% = Sharpe "+a.sh.toFixed(2);
-  else if(a.ret!=null)
-    tip="Sharpe "+a.sh.toFixed(2)+" · 1Y return "+a.ret.toFixed(1)+"% · vol "+a.vol.toFixed(1)+"% · rf "+RF+"%";
-  else
-    tip="Sharpe "+a.sh.toFixed(2)+" · vol "+a.vol.toFixed(1)+"% · rf "+RF+"%";
-  return{text:a.sh.toFixed(2)+" · "+band,tip:tip};
+  if(isRef)tip="SPY reference row · 1Y Sharpe "+num+". Other names' labels compare to this.";
+  else if(a.sh<0)tip="1Y Sharpe "+num+" — return fell below cash (risk-free "+RF+"%).";
+  else tip="1Y Sharpe "+num+" vs SPY "+(spyRef!=null?spyRef.toFixed(2):"—")+" (same 1Y window, same formula).";
+  return{text:num+" · "+label,tip:tip};
 }
 
 const FALLBACK_ASSETS = [
@@ -462,6 +483,11 @@ const FALLBACK_ASSETS = [
 
 // ASSETS starts as fallback, gets replaced when backend screening completes
 let ASSETS = FALLBACK_ASSETS;
+
+// CORR column: session-only selection (survives Discovery remounts within the
+// page session, resets on reload — "session only" per the wiring spec). Holds a
+// portfolio name (e.g. "A") or null = Off/no column. Not persisted to storage.
+let CORR_SEL = null;
 
 const COLORS=["#534AB7","#1D9E75","#BA7517","#185FA5","#993C1D","#3B6D11","#0F6E56","#854F0B","#A32D2D","#0C447C","#3C3489","#085041","#633806","#4B1528"];
 const TC={Stock:"#534AB7",ETF:"#1D9E75",Bond:"#185FA5","Mutual Fund":"#BA7517",Option:"#993C1D",Futures:"#4B1528",REIT:"#A32D2D"};
@@ -714,6 +740,13 @@ function Discovery({profile,ports,onAdd}){
   const[signalInfo,setSignalInfo]=useState(false);
   const searchRef=useRef(null);
   const skipNextSearch=useRef(false);
+  // CORR column state (CORRELATION_COLUMN_SPEC §A + Amendment 4).
+  const[corrSel,setCorrSel]=useState(CORR_SEL);           // portfolio name or null (Off)
+  const[corrMenu,setCorrMenu]=useState(false);
+  const[corrTick,setCorrTick]=useState(0);                // re-render trigger for the cache ref
+  const corrCacheRef=useRef({});                          // { [port]: {key,loading,error,map} }
+  const corrChipRef=useRef(null);
+  const[spyRefState,setSpyRefState]=useState(null);       // derived SPY 1Y Sharpe (when not in row set)
 
   useEffect(()=>{
     if(skipNextSearch.current){skipNextSearch.current=false;return;}
@@ -737,6 +770,56 @@ function Discovery({profile,ports,onAdd}){
     document.addEventListener("keydown",onKey);
     return()=>{document.removeEventListener("mousedown",onDoc);document.removeEventListener("keydown",onKey);};
   },[]);
+
+  // Persist corr selection for the session (module var survives remounts).
+  useEffect(()=>{CORR_SEL=corrSel;},[corrSel]);
+
+  // SPY reference Sharpe for the market-relative label. Prefer the row-set value;
+  // else derive once per screen via /api/ticker/add (reads the number only — SPY
+  // is NOT added to ASSETS). Else stays null -> label falls back to "—".
+  const spyInRows=ASSETS.find(x=>x.id===SPY_REF_TICKER);
+  const spyRef=spyInRows?spyInRows.sh:spyRefState;
+  useEffect(()=>{
+    if(spyInRows||spyRefState!=null)return;
+    let cancelled=false;
+    apiFetch("/api/ticker/add",{symbol:SPY_REF_TICKER})
+      .then(d=>{if(!cancelled&&d&&typeof d.sh==="number")setSpyRefState(d.sh);})
+      .catch(()=>{});
+    return()=>{cancelled=true;};
+  },[ASSETS.length]);
+
+  // Close the corr picker menu on outside click / Escape.
+  useEffect(()=>{
+    if(!corrMenu)return;
+    const onDoc=ev=>{if(corrChipRef.current&&!corrChipRef.current.contains(ev.target))setCorrMenu(false);};
+    const onKey=ev=>{if(ev.key==="Escape")setCorrMenu(false);};
+    document.addEventListener("mousedown",onDoc);document.addEventListener("keydown",onKey);
+    return()=>{document.removeEventListener("mousedown",onDoc);document.removeEventListener("keydown",onKey);};
+  },[corrMenu]);
+
+  // Cache key per portfolio: composition + screened universe. Refetch only when
+  // either changes (or on error); switching portfolios reuses cached results.
+  const holdingsKey=useMemo(()=>corrSel?JSON.stringify(ports[corrSel]||{}):"",[corrSel,ports]);
+  const candKey=useMemo(()=>ASSETS.map(x=>x.id).join(","),[ASSETS.length]);
+  const writeCorr=(port,val)=>{corrCacheRef.current={...corrCacheRef.current,[port]:val};setCorrTick(t=>t+1);};
+  useEffect(()=>{
+    if(!corrSel)return;
+    const port=ports[corrSel]||{};
+    const holdings=Object.entries(port).map(([ticker,weight])=>({ticker,weight}));
+    if(holdings.length<2)return;                          // guarded by disabled chip; defensive
+    const candidates=ASSETS.map(x=>x.id).slice(0,100);    // backend caps candidates at 100
+    const key=holdingsKey+"|"+candKey;
+    const existing=corrCacheRef.current[corrSel];
+    if(existing&&existing.key===key&&!existing.error)return; // already cached
+    let cancelled=false;
+    writeCorr(corrSel,{key,loading:true,error:null,map:{}});
+    apiFetch("/api/discovery/context",{holdings,candidates,window:252})
+      .then(d=>{if(cancelled)return;const map={};(d.results||[]).forEach(r=>{map[r.ticker]=r;});writeCorr(corrSel,{key,loading:false,error:null,map});})
+      .catch(e=>{if(cancelled)return;writeCorr(corrSel,{key,loading:false,error:(e.message||"failed"),map:{}});});
+    return()=>{cancelled=true;};
+  },[corrSel,holdingsKey,candKey]);
+  const corrState=corrSel?corrCacheRef.current[corrSel]:null;
+  const corrErr=corrState&&corrState.error;
 
   const fetchTicker=async sym=>{
     setAddingTicker(sym);setAddError(null);
@@ -845,6 +928,22 @@ function Discovery({profile,ports,onAdd}){
         )
       )
     ),
+    e("div",{style:{display:"flex",alignItems:"center",gap:8,margin:"2px 0 8px",flexWrap:"wrap"}},
+      e("div",{ref:corrChipRef,style:{position:"relative"}},
+        e("button",{className:"btn btn-xs"+(corrSel?" btn-p":""),onClick:()=>setCorrMenu(m=>!m),style:{fontSize:10},title:"Compare each name's correlation to one of your portfolios"},"Corr vs: "+(corrSel||"—")+" ▾"),
+        corrMenu&&e("div",{style:{position:"absolute",zIndex:200,top:"100%",left:0,marginTop:4,background:"#0c1220",border:"1px solid rgba(99,102,241,.25)",borderRadius:8,padding:4,minWidth:160,boxShadow:"0 12px 40px rgba(0,0,0,.5)"}},
+          pks.map(pn=>{
+            const n=Object.keys(ports[pn]||{}).length;const disabled=n<2;
+            return e("button",{key:pn,disabled,onClick:()=>{if(disabled)return;setCorrSel(pn);setCorrMenu(false);},title:disabled?"Needs at least 2 holdings":undefined,
+              style:{display:"block",width:"100%",textAlign:"left",background:corrSel===pn?"rgba(99,102,241,.15)":"none",border:"none",color:disabled?"#475569":"#cbd5e1",cursor:disabled?"not-allowed":"pointer",fontSize:11,padding:"5px 8px",borderRadius:5}},
+              "Portfolio "+pn+(disabled?" (empty)":""));
+          }),
+          e("button",{onClick:()=>{setCorrSel(null);setCorrMenu(false);},style:{display:"block",width:"100%",textAlign:"left",background:!corrSel?"rgba(99,102,241,.15)":"none",border:"none",color:"#cbd5e1",cursor:"pointer",fontSize:11,padding:"5px 8px",borderRadius:5,borderTop:"1px solid rgba(99,102,241,.1)",marginTop:2}},"Off")
+        )
+      ),
+      corrSel&&corrState&&corrState.loading&&e("span",{style:{fontSize:10,color:"#64748b"}},e("span",{className:"spin"},"◌")," loading correlations…"),
+      corrErr&&e("span",{style:{fontSize:10,color:"#f87171"}},"Correlation data unavailable — column shows —.")
+    ),
     e("div",{className:"tbl-wrap"},
       e("table",{className:"dtbl"},
         e("thead",null,e("tr",null,
@@ -861,6 +960,7 @@ function Discovery({profile,ports,onAdd}){
           e("th",null,e("span",{style:{display:"inline-flex",alignItems:"center",gap:4}},"SHARPE (1Y)",
             e("span",{onClick:(ev)=>{ev.stopPropagation();setSignalInfo(true);},title:"What does Sharpe (1Y) measure?",style:{cursor:"pointer",fontSize:11,color:"#818cf8",fontWeight:"normal"}},"ⓘ")
           )),
+          corrSel&&e("th",{title:"Correlation of daily returns with Portfolio "+corrSel+" — calm window / stress window"},e("span",{style:{display:"inline-flex",alignItems:"center",gap:4}},"CORR vs "+corrSel,e("span",{style:{fontSize:8,color:"#64748b",fontWeight:"normal"}},"(calm/stress)"))),
           e("th",null,"ADD TO")
         )),
         e("tbody",null,rows.map(a=>{
@@ -895,15 +995,34 @@ function Discovery({profile,ports,onAdd}){
             e("td",{style:{color:a.debtEq==null?"#64748b":a.debtEq<0.5?"#1D9E75":a.debtEq<=1.5?"#f59e0b":"#ef4444"}},a.debtEq==null?"—":a.debtEq.toFixed(2)),
             e("td",{style:{color:a.revGrowth==null?"#64748b":a.revGrowth>5?"#1D9E75":a.revGrowth>=0?"#f59e0b":"#ef4444"}},a.revGrowth==null?"—":(a.revGrowth>0?"+":"")+a.revGrowth.toFixed(1)+"%"),
             e("td",{style:{color:a.rsi>70?"#ef4444":a.rsi<30?"#1D9E75":"#94a3b8"}},a.rsi||"—"),
-            (()=>{const c=sharpeCell(a);return e("td",{style:{fontSize:11,fontWeight:"bold",color:"#cbd5e1"}},e("span",{title:c.tip},c.text));})(),
+            (()=>{const c=sharpeCell(a,spyRef);return e("td",{style:{fontSize:11,fontWeight:"bold",color:"#cbd5e1"}},e("span",{title:c.tip},c.text));})(),
+            corrSel&&(()=>{
+              const st=corrState;
+              if(!st||st.loading)return e("td",{style:{color:"#475569"}},e("span",{title:"Loading…"},"···"));
+              if(st.error)return e("td",{style:{color:"#64748b"}},e("span",{title:"Correlation data unavailable"},"—"));
+              const entry=st.map[a.id];
+              if(!entry||entry.corr_normal==null){
+                const held=entry&&entry.status==="held";
+                return e("td",{style:{color:"#64748b"}},e("span",{title:held?"In Portfolio "+corrSel+" — not enough distinct history to compare against the rest":"Insufficient history"},"—"));
+              }
+              const cn=entry.corr_normal,cs=entry.corr_stress,held=entry.status==="held";
+              const lbl=corrLabel(cn,corrSel);
+              const facts="252d daily returns vs Portfolio "+corrSel+" value-weighted series · "+entry.days_normal+" overlapping calm days"+(entry.days_stress?(" · "+entry.days_stress+" stress days"):"")+(held?" (vs rest of "+corrSel+")":"");
+              return e("td",{style:{color:"#cbd5e1",fontSize:11}},
+                e("span",{title:facts},cn.toFixed(2)+" / "+(cs!=null?cs.toFixed(2):"—")),
+                entry.flip_flag&&e("span",{style:{color:"#fbbf24",cursor:"help"},title:"Correlation rises ≥0.20 under stress ("+cn.toFixed(2)+" → "+cs.toFixed(2)+")"}," ⚠"),
+                e("span",{title:facts}," · "+lbl)
+              );
+            })(),
             e("td",null,e("div",{style:{display:"flex",gap:3}},
               pks.map(pn=>{const inP=ports[pn][a.id]!==undefined;return e("button",{key:pn,className:"btn btn-xs "+(inP?"btn-s":"btn-p"),onClick:ev=>{ev.stopPropagation();onAdd(pn,a.id);}},(inP?"✓":"+")+(" "+pn));})
             ))
           );
         })),
         e("tfoot",null,
-          e("tr",null,e("td",{colSpan:21,style:{padding:"8px 6px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Fit scores rate each security on its own — they don't know what you already hold. Two top-ranked names can be near-duplicates of each other or of your portfolio. Diversification happens in the optimizer, not in this list.")),
-          e("tr",null,e("td",{colSpan:21,style:{padding:"0 6px 8px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Sharpe ratio: past-year return above the risk-free rate, per unit of volatility. A historical description, not a forecast or recommendation.")))
+          e("tr",null,e("td",{colSpan:corrSel?22:21,style:{padding:"8px 6px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Fit scores rate each security on its own — they don't know what you already hold. Two top-ranked names can be near-duplicates of each other or of your portfolio. Diversification happens in the optimizer, not in this list.")),
+          e("tr",null,e("td",{colSpan:corrSel?22:21,style:{padding:"0 6px 8px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Sharpe (1Y): past-year return above the risk-free rate, per unit of volatility. The label compares each name's Sharpe to SPY's over the same window (cash = the risk-free rate). Historical, not a forecast or recommendation.")),
+          corrSel&&e("tr",null,e("td",{colSpan:22,style:{padding:"0 6px 8px",fontSize:10,color:"#64748b",lineHeight:1.5,fontStyle:"italic"}},"Correlation of daily returns with the selected portfolio, in calm and stressed markets. Historical co-movement — not a forecast.")))
       )
     ),
     openTicker&&e(TickerChart,{ticker:openTicker,name:(ASSETS.find(x=>x.id===openTicker)||{}).n,onClose:()=>setOpenTicker(null)}),
@@ -911,7 +1030,7 @@ function Discovery({profile,ports,onAdd}){
       e("div",{onClick:(ev)=>ev.stopPropagation(),style:{background:"#0c1220",border:"1px solid rgba(99,102,241,.25)",borderRadius:12,padding:"20px 22px",maxWidth:440,position:"relative",boxShadow:"0 20px 60px rgba(0,0,0,.5)"}},
         e("button",{onClick:()=>setSignalInfo(false),title:"Close",style:{position:"absolute",top:8,right:10,background:"none",border:"none",color:"#94a3b8",fontSize:18,cursor:"pointer",padding:"2px 8px",lineHeight:1}},"✕"),
         e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",marginBottom:10,letterSpacing:.5}},"WHAT SHARPE (1Y) MEASURES"),
-        e("div",{style:{fontSize:13,color:"#cbd5e1",lineHeight:1.6}},"This column is the security's Sharpe ratio over the past year: (1-year return − risk-free rate) ÷ annualized volatility. The band word — High, Moderate, Low, Minimal, or Negative — just describes where that number falls. It is a backward-looking description of realized risk-adjusted return over the last 12 months only. It says nothing about the company's valuation, quality, or future returns, and it is not a forecast or a recommendation. The Indicator Consensus inside each ticker's chart measures short-term technical conditions and can disagree with this number — disagreement is information, not an error.")
+        e("div",{style:{fontSize:13,color:"#cbd5e1",lineHeight:1.6}},"This column is the security's Sharpe ratio over the past year: (1-year return − risk-free rate) ÷ annualized volatility. The label states how that number compares to an explicit reference: \"Beat market\" / \"Trailed market\" compare it to SPY's Sharpe over the same window and formula; \"Lost vs cash\" means the return fell below the risk-free rate (cash); SPY's own row shows \"Reference\". If no SPY figure is available for the screen, the label shows \"—\" rather than inventing the comparison. It is a backward-looking description of the last 12 months only — it says nothing about valuation, quality, or future returns, and is not a forecast or a recommendation. The Indicator Consensus inside each ticker's chart measures short-term technical conditions and can disagree with this number — disagreement is information, not an error.")
       )
     )
   );

@@ -96,3 +96,30 @@ Panel titled with the regulated word "ADVISER" and populated with advice-shaped 
 ## Amendment 1 (2026-07-07): A2 premise corrected — verdict source is Sharpe threshold, not technical state; column remediated as SHARPE (1Y) with factual bands; modal 884 description corrected to match computation.
 
 ## Amendment 2 (2026-07-07): scope boundary — Indicator Consensus remediated to descriptive tilt; Trade Desk recommendation engine identified as separate defect (disclaimer-camouflage pattern, IDENTITY.md §1/§5), deferred to its own sealed spec TRADE_DESK_SPEC.md; temp shim in place; fundamental.py recommendation field under source review.
+
+## Amendment 3 (2026-07-08): Reference-point vocabulary — retires the prohibited-word list and the quality-grade band tables.
+
+Supersedes: INTERFACE_VERDICTS_SPEC.md wiring rule #3 (prohibited-word list) and
+the High/Moderate/Low band tables in both the SIGNAL→SHARPE work (Amendment 1)
+and the correlation-column wiring instruction.
+
+Principle: every categorical label in a data column must name an EXPLICIT
+reference point and state, factually, how the value relates to it — not a
+quality grade ("High/Moderate/Low"), not a verdict, not advice. "Diversifier"/
+"hedge"/"complement" etc. are no longer prohibited as words; they are simply
+not used, because reference-point phrasing replaces grade phrasing entirely.
+
+Correlation column (reference = the selected portfolio {A|B|C}):
+  r ≥ 0.2    → "Moves with {A|B|C}"
+  r ≤ −0.2   → "Moves against {A|B|C}"
+  |r| < 0.2  → "Unlinked"
+
+Sharpe (1Y) column (reference = SPY, same method + same window; cash = risk-free rate):
+  Sharpe < 0                          → "Lost vs cash"
+  Sharpe ≥ 0 and ≥ SPY Sharpe         → "Beat market"
+  Sharpe ≥ 0 and < SPY Sharpe         → "Trailed market"
+
+These replace, not augment, the prior band vocabulary in the governed columns.
+The backend `discovery_context.band` field (Near-duplicate/Very similar/Related/
+Diversifier/Hedge) is sealed and unchanged; governed UI columns simply do not
+render it.

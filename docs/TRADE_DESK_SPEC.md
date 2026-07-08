@@ -33,6 +33,20 @@ To decouple this deferred surface from the completed SIGNAL→SHARPE(1Y) work, t
 
 - Landing proof-block caption "Fundamentals and technicals can disagree" (`static/quantex.html`, proof-block near the MSFT SHARPE(1Y) / Indicator Consensus demo) needs a rewrite when the desk is remediated. It now pairs a Sharpe (1Y) display with a technical tilt, so "Fundamentals" no longer accurately names the left-hand quantity. Deferred with the desk to keep the landing narrative and the desk remediation consistent.
 
+## Vocabulary debt
+
+- **Backend `sig` field emits retired band words, unrendered as of Amendment 3.**
+  `app/main.py::_sharpe_band` (and the frontend `sharpeBand`, `mapScreened` line
+  ~369) still produce the High/Moderate/Low/Minimal/Negative band vocabulary in
+  the `sig` field. As of INTERFACE_VERDICTS_SPEC.md Amendment 3, no UI column
+  renders `sig` — the SHARPE (1Y) column uses the frontend reference-point label
+  (`sharpeMarketLabel`, vs SPY), and the Trade Desk uses `legacyVerdict(a.sh)`.
+  Left in place deliberately: `_sharpe_band` is a pure function of a single
+  Sharpe with no SPY reference in scope, so it structurally cannot emit the
+  Amendment 3 market-relative labels; changing it would also disturb the sealed
+  Amendment-1 closed-set tests for no rendered benefit. Retire the field (or give
+  it a reference-aware producer) if/when the backend gains a market reference.
+
 ## Open design question (to be answered cold, before any implementation)
 
 **Should a capability demonstration (IDENTITY.md §1) issue machine-generated trade recommendations at all — or should the "trade" surface be reframed as user-directed paper-trading only, where the user states the thesis and the tool executes/records, issuing no buy/sell/hold call of its own?**

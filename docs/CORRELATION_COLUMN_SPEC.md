@@ -116,3 +116,17 @@ structural answer.
 3. `/api/correlations/rolling` + chart + regime shading.
 4. Regression: existing suite stays green; `/api/screen` response unchanged
    (context is a separate call — screening latency must not grow).
+
+## Amendment 4 (2026-07-08): §A calm/stress design upheld; picker chip layered on top; frontend labels via Amendment 3 reference-point vocabulary; backend band field unused by this column, unchanged.
+
+UI wiring built per IDENTITY.md §5 picker decision. The §A `/api/discovery/context`
+contract (calm `corr_normal` + stress `corr_stress` + `flip_flag` + 4-state
+`status`) is upheld verbatim — no backend or sealed-test change. Layered on top:
+a discovery-toolbar picker chip ("Corr vs: — ▾", menu Portfolio A/B/C/Off,
+empty portfolios disabled), default no column until a selection is made. The
+cell renders both correlations plus a reference-point label derived in the
+frontend from `corr_normal` per INTERFACE_VERDICTS_SPEC.md Amendment 3
+(Moves with / Moves against / Unlinked, referenced to the selected portfolio);
+`flip_flag` renders ⚠ with a factual stress-rise tooltip. The backend `band`
+field (Near-duplicate/…/Diversifier/Hedge) is intentionally NOT rendered by this
+column. §B rolling correlation visual remains unbuilt.
