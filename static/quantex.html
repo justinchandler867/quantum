@@ -440,6 +440,31 @@ function sharpeCell(a, spyRef){
   return{text:num+" · "+label,tip:tip};
 }
 
+// Portfolio beta reference-point labels (BETA_TRACKER_SPEC.md; Amendment 3).
+// vs market — tolerance 0.1 around β=1.
+function betaMarketLabel(b){
+  if(b==null||isNaN(b))return null;
+  if(Math.abs(b-1)<0.1)return"Market-like";
+  return b>1?"More volatile than market":"Less volatile than market";
+}
+// vs the user's OWN declared band [lo,hi] only. No band -> null (no label).
+function betaBandLabel(b,lo,hi){
+  if(b==null||isNaN(b)||lo==null||hi==null)return null;
+  if(b>hi)return"Above band ▲";
+  if(b<lo)return"Below band ▼";
+  return"In band ✓";
+}
+// Marginal-preview band transition: only when a pending change crosses the band.
+// arrow = direction of the beta move (▼ down / ▲ up).
+function betaTransition(oldB,newB,lo,hi){
+  if(oldB==null||newB==null||isNaN(oldB)||isNaN(newB)||lo==null||hi==null)return"";
+  const inOld=oldB>=lo&&oldB<=hi, inNew=newB>=lo&&newB<=hi;
+  const arrow=newB<oldB?"▼":"▲";
+  if(!inOld&&inNew)return arrow+" into band";
+  if(inOld&&!inNew)return arrow+" out of band";
+  return"";
+}
+
 const FALLBACK_ASSETS = [
   {id:"AAPL",n:"Apple Inc.",t:"Stock",sec:"Technology",ret:24.8,vol:28,beta:1.24,sh:1.31,yld:.5,rsi:61,macd:"Bullish",tgt:235,stop:188,goals:["Growth","Balanced"],rb:[2,5],hm:3,s08:-54,s20:-32,s22:-27},
   {id:"MSFT",n:"Microsoft Corp.",t:"Stock",sec:"Technology",ret:18.2,vol:26,beta:.91,sh:1.42,yld:.7,rsi:58,macd:"Bullish",tgt:480,stop:390,goals:["Growth","Balanced"],rb:[2,5],hm:3,s08:-44,s20:-28,s22:-29},
@@ -1851,6 +1876,34 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
   const[stressResult,setStressResult]=useState(null);
   const[stressLoading,setStressLoading]=useState(false);
   const[stressError,setStressError]=useState(null);
+  // Portfolio beta tracker (BETA_TRACKER_SPEC.md)
+  const[beta,setBeta]=useState(null);          // {beta,r2,n_obs,window,benchmark,status}
+  const[betaLoading,setBetaLoading]=useState(false);
+  const[bandLo,setBandLo]=useState("");        // user-declared band — NEVER defaulted
+  const[bandHi,setBandHi]=useState("");
+  const[previewTk,setPreviewTk]=useState(null);// holding hovered for removal
+  const[preview,setPreview]=useState(null);    // beta with previewTk removed
+  const wkey=JSON.stringify(weights);
+  useEffect(()=>{
+    const hs=Object.entries(weights).map(([ticker,weight])=>({ticker,weight}));
+    if(hs.length<1){setBeta(null);return;}
+    let cancelled=false;setBetaLoading(true);
+    apiFetch("/api/portfolio/beta",{holdings:hs})
+      .then(d=>{if(!cancelled)setBeta(d);})
+      .catch(()=>{if(!cancelled)setBeta(null);})
+      .finally(()=>{if(!cancelled)setBetaLoading(false);});
+    return()=>{cancelled=true;};
+  },[wkey]);
+  useEffect(()=>{
+    if(!previewTk){setPreview(null);return;}
+    const hs=Object.entries(weights).filter(([t])=>t!==previewTk).map(([ticker,weight])=>({ticker,weight}));
+    if(hs.length<1){setPreview(null);return;}
+    let cancelled=false;
+    apiFetch("/api/portfolio/beta",{holdings:hs})
+      .then(d=>{if(!cancelled)setPreview(d);})
+      .catch(()=>{if(!cancelled)setPreview(null);});
+    return()=>{cancelled=true;};
+  },[previewTk,wkey]);
   const OPT_GOALS=[
     {id:"sharpe",title:"Best return per unit of risk",sub:"Finds the portfolio with the highest Sharpe ratio. Good if you want to maximize growth while controlling volatility.",result:"Found the weights that maximize (return − risk-free) ÷ volatility — the highest Sharpe ratio your constraints allow."},
     {id:"minvol",title:"Lowest possible risk",sub:"Finds the portfolio with minimum volatility. Good if preserving capital matters more than growth.",result:"Minimized portfolio volatility — the most stable combination of your holdings."},
@@ -1892,9 +1945,37 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
           e("span",{className:"w-tick",style:{color:COLORS[i%COLORS.length]}},k),
           e("input",{type:"range",min:0,max:60,value:weights[k],onChange:ev=>onUpdate(k,+ev.target.value),style:{flex:1,accentColor:COLORS[i%COLORS.length]}}),
           e("span",{className:"w-pct"},weights[k]+"%"),
-          e("button",{className:"btn btn-d btn-xs",onClick:()=>onRemove(k)},"✕")
+          e("button",{className:"btn btn-d btn-xs",onClick:()=>onRemove(k),onMouseEnter:()=>setPreviewTk(k),onMouseLeave:()=>setPreviewTk(null),title:"Remove (hover to preview β)"},"✕")
         )),
-        e("div",{style:{fontSize:11,color:"#475569",marginTop:7,paddingTop:7,borderTop:"1px solid #1a2540"}},"Total: ",e("span",{style:{fontWeight:"bold",color:Math.abs(total-100)<2?"#1D9E75":"#ef4444"}},total+"%"))
+        e("div",{style:{fontSize:11,color:"#475569",marginTop:7,paddingTop:7,borderTop:"1px solid #1a2540"}},"Total: ",e("span",{style:{fontWeight:"bold",color:Math.abs(total-100)<2?"#1D9E75":"#ef4444"}},total+"%")),
+        (()=>{
+          const lo=bandLo!==""&&!isNaN(+bandLo)?+bandLo:null, hi=bandHi!==""&&!isNaN(+bandHi)?+bandHi:null;
+          const bandSet=lo!=null&&hi!=null&&hi>=lo;
+          const b=beta&&beta.status==="ok"?beta.beta:null;
+          const bench=(beta&&beta.benchmark)||"SPY", benchName=bench==="SPY"?"S&P 500":bench;
+          const tip=b!=null?("Regression of the value-weighted portfolio's daily returns on "+bench+" over "+beta.window+" trading days · R² "+(beta.r2!=null?beta.r2.toFixed(2):"—")+" · "+beta.n_obs+" observations"):(beta?("Insufficient overlapping history ("+(beta.n_obs||0)+" days; need ≥60)"):"");
+          const mkt=betaMarketLabel(b), bandLbl=bandSet?betaBandLabel(b,lo,hi):null;
+          const pv=preview&&preview.status==="ok"?preview.beta:null;
+          const trans=bandSet?betaTransition(b,pv,lo,hi):"";
+          return e("div",{style:{marginTop:9,paddingTop:9,borderTop:"1px solid #1a2540"}},
+            e("div",{style:{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}},
+              e("span",{title:tip,style:{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:"bold",color:"#cbd5e1",cursor:b!=null?"help":"default"}},
+                "Portfolio β "+(betaLoading&&!beta?"…":b!=null?b.toFixed(2):"—")+" · vs "+benchName),
+              mkt&&e("span",{style:{fontSize:10,color:"#94a3b8"}},"· "+mkt),
+              bandLbl&&e("span",{style:{fontSize:10,fontWeight:"bold",color:bandLbl.indexOf("In band")===0?"#1D9E75":"#f59e0b"}},"· "+bandLbl)
+            ),
+            previewTk&&pv!=null&&b!=null&&e("div",{style:{fontSize:11,color:"#a5b4fc",marginTop:4,fontFamily:"'JetBrains Mono',monospace"}},
+              "β "+b.toFixed(2)+" → "+pv.toFixed(2)+" (removing "+previewTk+")"+(trans?" · "+trans:"")),
+            e("div",{style:{display:"flex",alignItems:"center",gap:5,marginTop:6,fontSize:10,color:"#64748b"}},
+              e("span",null,"Target band (optional):"),
+              e("input",{type:"number",step:"0.05",placeholder:"lo",value:bandLo,onChange:ev=>setBandLo(ev.target.value),style:{width:46,padding:"2px 4px",background:"#080d1a",border:"1px solid #1a2540",borderRadius:4,color:"#cbd5e1",fontSize:10}}),
+              e("span",null,"–"),
+              e("input",{type:"number",step:"0.05",placeholder:"hi",value:bandHi,onChange:ev=>setBandHi(ev.target.value),style:{width:46,padding:"2px 4px",background:"#080d1a",border:"1px solid #1a2540",borderRadius:4,color:"#cbd5e1",fontSize:10}}),
+              (bandLo!==""||bandHi!=="")&&e("button",{onClick:()=>{setBandLo("");setBandHi("");},style:{background:"none",border:"none",color:"#64748b",cursor:"pointer",fontSize:10}},"clear")
+            ),
+            e("div",{style:{fontSize:9,color:"#475569",marginTop:3,fontStyle:"italic"}},"Regressed, not a weighted average of betas. R² and observation count in the β tooltip. You set the band; Quantex never suggests one.")
+          );
+        })()
       ),
       e("div",{className:"card"},
         e("div",{className:"card-title"},"OPTIMIZER"),

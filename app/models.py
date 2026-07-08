@@ -105,6 +105,23 @@ class DiscoveryContextResponse(BaseModel):
     results: list[DiscoveryContextEntry]
 
 
+# ── Portfolio Beta Tracker (BETA_TRACKER_SPEC.md) ────────────────────────────
+
+class PortfolioBetaRequest(BaseModel):
+    holdings: list[HoldingInput] = Field(..., min_length=1, description="Portfolio (or hypothetical/preview) holdings")
+    window: int = Field(252, ge=60, le=1260, description="Trailing regression window, same 252d default as the correlation column")
+    benchmark: str = Field("SPY", description="v1 default SPY; multi-benchmark out of scope")
+
+
+class PortfolioBetaResponse(BaseModel):
+    beta: float | None
+    r2: float | None
+    n_obs: int
+    window: int
+    benchmark: str
+    status: str = Field(..., pattern="^(ok|insufficient_data)$")
+
+
 # ── Optimizer Models ─────────────────────────────────────────────────────────
 
 class ProfileConstraintsInput(BaseModel):

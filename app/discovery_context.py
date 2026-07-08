@@ -23,6 +23,9 @@ from app.config import (
     HIGH_CORR_NORMAL_THRESHOLD,
     NEGATIVE_CORR_THRESHOLD,
 )
+# Value-weighted portfolio return series lifted to a shared helper so beta and
+# correlation consume one implementation (BETA_TRACKER_SPEC.md prerequisite).
+from app.portfolio_series import weighted_portfolio_returns as _portfolio_returns
 
 logger = logging.getLogger(__name__)
 
@@ -59,41 +62,6 @@ def band_label(corr_normal: float) -> str:
     if corr_normal >= NEGATIVE_CORR_THRESHOLD:
         return "Diversifier"
     return "Hedge"
-
-
-def _portfolio_returns(
-    returns: pd.DataFrame,
-    holdings: dict[str, float],
-    exclude: str | None = None,
-) -> pd.Series | None:
-    """
-    Value-weighted portfolio daily return series: r_P,t = sum(w_i * r_i,t).
-
-    `holdings` maps ticker -> weight (need not already sum to 1; renormalized
-    here). If `exclude` is given, that ticker is dropped and the remaining
-    weights renormalized (§A1 held-candidate exclusion path).
-
-    Returns None if fewer than 1 holding remains after exclusion/filtering,
-    or none of the holdings have return data.
-    """
-    w = dict(holdings)
-    if exclude is not None:
-        w.pop(exclude, None)
-
-    tickers = [t for t in w.keys() if t in returns.columns]
-    if not tickers:
-        return None
-
-    total = sum(w[t] for t in tickers)
-    if total <= 0:
-        return None
-
-    norm_w = {t: w[t] / total for t in tickers}
-
-    sub = returns[tickers]
-    weighted = sub.mul(pd.Series(norm_w))
-    port_ret = weighted.sum(axis=1, skipna=False)
-    return port_ret
 
 
 def _aligned_pearson(a: pd.Series, b: pd.Series) -> tuple[float | None, int]:

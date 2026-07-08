@@ -66,6 +66,8 @@ from app.models import (
     PricesResponse,
     DiscoveryContextRequest,
     DiscoveryContextResponse,
+    PortfolioBetaRequest,
+    PortfolioBetaResponse,
     DiscoveryContextEntry,
     SearchRequest,
     SearchResult,
@@ -91,7 +93,8 @@ from app.correlation_engine import (
     lambda_from_risk_score,
 )
 from app.cache import cache_key, cache_get, cache_set
-from app.discovery_context import compute_candidate_context
+from app.discovery_context import compute_candidate_context, MIN_OVERLAP_DAYS
+from app.portfolio_series import weighted_portfolio_returns, regress_beta
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -455,6 +458,39 @@ async def discovery_context(req: DiscoveryContextRequest):
         ))
 
     return DiscoveryContextResponse(results=results)
+
+
+@app.post("/api/portfolio/beta", response_model=PortfolioBetaResponse)
+async def portfolio_beta(req: PortfolioBetaRequest):
+    """
+    Portfolio beta tracker (BETA_TRACKER_SPEC.md). Beta is the OLS regression
+    (cov/var) of the value-weighted portfolio daily-return series on the
+    benchmark, over the same trailing 252-day window as the correlation column —
+    NOT the weighted average of per-asset betas. Discloses R² and observation
+    count so a low R² is shown, not hidden. Accepts hypothetical/preview holdings
+    for the marginal preview (β X → Y); the caller computes both.
+    """
+    holdings = {h.ticker: h.weight for h in req.holdings}
+    needed = list(holdings.keys()) + [req.benchmark]
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _ensure_data, needed)
+    returns = _store["returns"]
+
+    def _insufficient(n):
+        return PortfolioBetaResponse(beta=None, r2=None, n_obs=n, window=req.window,
+                                     benchmark=req.benchmark, status="insufficient_data")
+
+    port = weighted_portfolio_returns(returns, holdings)
+    if port is None or returns is None or req.benchmark not in returns.columns:
+        return _insufficient(0)
+
+    beta, r2, n = regress_beta(port, returns[req.benchmark], req.window,
+                               min_overlap=MIN_OVERLAP_DAYS)  # §A4: <60 -> "—", never 0
+    if beta is None:
+        return _insufficient(n)
+    return PortfolioBetaResponse(beta=beta, r2=r2, n_obs=n,
+                                 window=req.window, benchmark=req.benchmark, status="ok")
 
 
 @app.post("/api/data/refresh")
