@@ -122,6 +122,24 @@ class PortfolioBetaResponse(BaseModel):
     status: str = Field(..., pattern="^(ok|insufficient_data)$")
 
 
+# ── Rolling stock-bond correlation visual (CORRELATION_COLUMN_SPEC.md §B) ─────
+
+class RollingCorrRequest(BaseModel):
+    # Each sleeve is either a list of weighted holdings, or the fallback single
+    # ticker string ("SPY" / "TLT"). Caller (frontend) does the sleeve bucketing.
+    series_a: list[HoldingInput] | str
+    series_b: list[HoldingInput] | str
+    window: int = Field(63, ge=20, le=252)
+
+
+class RollingCorrResponse(BaseModel):
+    dates: list[str]
+    corr: list[float | None]
+    stress_windows: list[list[str]]
+    n_obs: int
+    status: str = Field(..., pattern="^(ok|insufficient_data)$")
+
+
 # ── Optimizer Models ─────────────────────────────────────────────────────────
 
 class ProfileConstraintsInput(BaseModel):

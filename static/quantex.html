@@ -465,6 +465,17 @@ function betaTransition(oldB,newB,lo,hi){
   return"";
 }
 
+// Sleeve bucketing for the rolling stock-bond visual (CORRELATION_COLUMN_SPEC §B;
+// GAP-A resolution): bond = sector "Fixed Income"; excluded (neither sleeve) =
+// Commodity/Volatility; equity = everything else (incl. Real Estate/International/
+// Broad Market). Tolerant to the sample-data "Commodities" spelling vs sectors.json.
+function sleeveOf(sec){
+  if(sec==null)return"equity";
+  if(sec==="Fixed Income")return"bond";
+  if(/^commodit/i.test(sec)||/^volatilit/i.test(sec))return"excluded";
+  return"equity";
+}
+
 const FALLBACK_ASSETS = [
   {id:"AAPL",n:"Apple Inc.",t:"Stock",sec:"Technology",ret:24.8,vol:28,beta:1.24,sh:1.31,yld:.5,rsi:61,macd:"Bullish",tgt:235,stop:188,goals:["Growth","Balanced"],rb:[2,5],hm:3,s08:-54,s20:-32,s22:-27},
   {id:"MSFT",n:"Microsoft Corp.",t:"Stock",sec:"Technology",ret:18.2,vol:26,beta:.91,sh:1.42,yld:.7,rsi:58,macd:"Bullish",tgt:480,stop:390,goals:["Growth","Balanced"],rb:[2,5],hm:3,s08:-44,s20:-28,s22:-29},
@@ -1862,6 +1873,85 @@ function ScenarioSandbox({tickers,weights}){
 }
 
 // ── Portfolio Builder ─────────────────────────────────────────────────────────
+// Rolling stock-bond correlation visual (CORRELATION_COLUMN_SPEC.md §B).
+function RollingCorrChart({weights}){
+  const[data,setData]=useState(null);
+  const[loading,setLoading]=useState(false);
+  const[collapsed,setCollapsed]=useState(false);
+  const wkey=JSON.stringify(weights);
+  const plan=useMemo(()=>{
+    const eq=[],bd=[],ex=[];
+    Object.entries(weights).forEach(([tk,w])=>{
+      const a=ASSETS.find(x=>x.id===tk)||{};
+      const s=sleeveOf(a.sec);
+      if(s==="bond")bd.push({ticker:tk,weight:w});
+      else if(s==="excluded")ex.push(tk);
+      else eq.push({ticker:tk,weight:w});
+    });
+    let seriesA,seriesB,fallbackNote=null,aLabel,bLabel;
+    if(bd.length===0||eq.length===0){
+      seriesA="SPY";seriesB="TLT";aLabel="SPY";bLabel="TLT";
+      fallbackNote=(eq.length===0&&bd.length===0?"Your portfolio has no equity or bond sleeve"
+        :bd.length===0?"Your portfolio has no bond sleeve":"Your portfolio has no equity sleeve")
+        +" — showing the market-level pair (SPY vs TLT).";
+    }else{
+      seriesA=eq;seriesB=bd;
+      aLabel="equity sleeve ("+eq.map(x=>x.ticker).join(", ")+")";
+      bLabel="bond sleeve ("+bd.map(x=>x.ticker).join(", ")+")";
+    }
+    const exclNote=ex.length?("Excludes "+ex.join(", ")+" — neither stocks nor bonds."):null;
+    return{seriesA,seriesB,fallbackNote,exclNote,aLabel,bLabel};
+  },[wkey]);
+  const reqKey=JSON.stringify([plan.seriesA,plan.seriesB]);
+  useEffect(()=>{
+    let cancelled=false;setLoading(true);
+    apiFetch("/api/correlations/rolling",{series_a:plan.seriesA,series_b:plan.seriesB,window:63})
+      .then(d=>{if(!cancelled)setData(d);}).catch(()=>{if(!cancelled)setData(null);}).finally(()=>{if(!cancelled)setLoading(false);});
+    return()=>{cancelled=true;};
+  },[reqKey]);
+
+  const W=520,H=170,padL=26,padR=12,padT=12,padB=20;
+  const pts=(data&&data.corr)||[], dates=(data&&data.dates)||[], n=pts.length;
+  const xs=i=>padL+(W-padL-padR)*(n>1?i/(n-1):0);
+  const ys=v=>padT+(H-padT-padB)*(1-(Math.max(-1,Math.min(1,v))+1)/2);
+  let lastCorr=null;for(let i=pts.length-1;i>=0;i--){if(pts[i]!=null){lastCorr=pts[i];break;}}
+  const marker=lastCorr!=null?+(lastCorr+0.20).toFixed(4):null;
+  const poly=pts.map((v,i)=>v==null?null:xs(i).toFixed(1)+","+ys(v).toFixed(1)).filter(Boolean).join(" ");
+  const dateIdx={};dates.forEach((d,i)=>{dateIdx[d]=i;});
+  const stress=((data&&data.stress_windows)||[]).map(([s,e])=>{const i0=dateIdx[s],i1=dateIdx[e];if(i0==null||i1==null)return null;return{x:xs(i0),w:Math.max(1.2,xs(i1)-xs(i0))};}).filter(Boolean);
+  const insufficient=data&&data.status==="insufficient_data";
+
+  return e("div",{className:"card"},
+    e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"},onClick:()=>setCollapsed(c=>!c)},
+      e("div",{className:"card-title",style:{marginBottom:collapsed?0:8}},"STOCK–BOND CORRELATION (rolling 63d)"),
+      e("span",{style:{color:"#64748b",fontSize:11}},collapsed?"▸":"▾")),
+    !collapsed&&e("div",null,
+      plan.fallbackNote&&e("div",{style:{fontSize:10,color:"#94a3b8",marginBottom:5}},plan.fallbackNote),
+      !plan.fallbackNote&&e("div",{style:{fontSize:10,color:"#64748b",marginBottom:5}},plan.aLabel+"  vs  "+plan.bLabel),
+      plan.exclNote&&e("div",{style:{fontSize:10,color:"#f59e0b",marginBottom:5,fontStyle:"italic"}},plan.exclNote),
+      (loading&&!data)?e("div",{style:{color:"#64748b",fontSize:12,padding:"20px 4px",textAlign:"center"}},e("span",{className:"spin"},"◌")," computing…")
+      :insufficient?e("div",{style:{color:"#64748b",fontSize:12,padding:"20px 4px",textAlign:"center"}},"Not enough overlapping history to plot (need ≥63 trading days).")
+      :e("svg",{viewBox:"0 0 "+W+" "+H,style:{width:"100%",height:"auto"}},
+          stress.map((r,i)=>e("rect",{key:"s"+i,x:r.x,y:padT,width:r.w,height:H-padT-padB,fill:"rgba(251,191,36,.10)"})),
+          [1,0,-1].map(v=>e("g",{key:"g"+v},
+            e("line",{x1:padL,y1:ys(v),x2:W-padR,y2:ys(v),stroke:v===0?"#334155":"#1a2540",strokeWidth:v===0?"1":".5",strokeDasharray:v===0?"3 3":undefined}),
+            e("text",{x:2,y:ys(v)+3,fontSize:8,fill:"#475569"},v>0?"+1":v===0?"0":"−1"))),
+          marker!=null&&e("g",null,
+            e("line",{x1:padL,y1:ys(marker),x2:W-padR,y2:ys(marker),stroke:"#a5b4fc",strokeWidth:".8",strokeDasharray:"4 2"}),
+            e("text",{x:W-padR,y:ys(marker)-3,fontSize:8,fill:"#a5b4fc",textAnchor:"end"},"2026 outlook assumption ("+marker.toFixed(2)+")")),
+          poly&&e("polyline",{points:poly,fill:"none",stroke:"#818cf8",strokeWidth:"1.3"}),
+          dates.length>0&&e("text",{x:padL,y:H-6,fontSize:8,fill:"#475569"},dates[0]),
+          dates.length>0&&e("text",{x:W-padR,y:H-6,fontSize:8,fill:"#475569",textAnchor:"end"},dates[dates.length-1])
+        ),
+      !insufficient&&data&&e("div",{style:{fontSize:9,color:"#475569",marginTop:2,display:"flex",gap:10,flexWrap:"wrap"}},
+        e("span",null,e("span",{style:{color:"#818cf8"}},"—")," rolling correlation"),
+        stress.length>0&&e("span",null,e("span",{style:{color:"#fbbf24"}},"▮")," stress windows"),
+        e("span",null,e("span",{style:{color:"#a5b4fc"}},"– –")," 2026 outlook (last + 0.20)")),
+      e("div",{style:{fontSize:10,color:"#94a3b8",lineHeight:1.5,marginTop:6,fontStyle:"italic"}},"Stock-bond correlation is not a constant. When it flips positive, bonds stop cushioning equity losses — this chart shows when that happened, and what the 2026 outlook assumes.")
+    )
+  );
+}
+
 function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
   const[optView,setOptView]=useState("picker");
   const[lastGoal,setLastGoal]=useState(null);
@@ -1977,6 +2067,7 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
           );
         })()
       ),
+      e(RollingCorrChart,{weights}),
       e("div",{className:"card"},
         e("div",{className:"card-title"},"OPTIMIZER"),
         // ── Return model selector ─────────────────────────────────────────

@@ -68,6 +68,8 @@ from app.models import (
     DiscoveryContextResponse,
     PortfolioBetaRequest,
     PortfolioBetaResponse,
+    RollingCorrRequest,
+    RollingCorrResponse,
     DiscoveryContextEntry,
     SearchRequest,
     SearchResult,
@@ -94,7 +96,7 @@ from app.correlation_engine import (
 )
 from app.cache import cache_key, cache_get, cache_set
 from app.discovery_context import compute_candidate_context, MIN_OVERLAP_DAYS
-from app.portfolio_series import weighted_portfolio_returns, regress_beta
+from app.portfolio_series import weighted_portfolio_returns, regress_beta, contiguous_true_ranges
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -491,6 +493,55 @@ async def portfolio_beta(req: PortfolioBetaRequest):
         return _insufficient(n)
     return PortfolioBetaResponse(beta=beta, r2=r2, n_obs=n,
                                  window=req.window, benchmark=req.benchmark, status="ok")
+
+
+@app.post("/api/correlations/rolling", response_model=RollingCorrResponse)
+async def correlations_rolling(req: RollingCorrRequest):
+    """
+    Rolling stock-bond correlation visual (CORRELATION_COLUMN_SPEC.md §B).
+    Each sleeve is a value-weighted daily-return series (shared helper) or a
+    fallback single ticker ("SPY"/"TLT"). Returns the rolling `window`-day Pearson
+    correlation of the two sleeves plus data_ingest's stress windows (shaded by
+    the frontend). Reuses _store["stress_mask"] — no stress recomputation.
+    """
+    def tickers_of(s):
+        return [s] if isinstance(s, str) else [h.ticker for h in s]
+
+    needed = tickers_of(req.series_a) + tickers_of(req.series_b)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _ensure_data, needed)
+    returns = _store["returns"]
+    stress_mask = _store["stress_mask"]
+
+    def series_of(s):
+        if isinstance(s, str):
+            return returns[s] if returns is not None and s in returns.columns else None
+        return weighted_portfolio_returns(returns, {h.ticker: h.weight for h in s})
+
+    a = series_of(req.series_a)
+    b = series_of(req.series_b)
+    empty = RollingCorrResponse(dates=[], corr=[], stress_windows=[], n_obs=0, status="insufficient_data")
+    if a is None or b is None:
+        return empty
+
+    a_al, b_al = a.align(b, join="inner")
+    valid = a_al.notna() & b_al.notna()
+    a_al, b_al = a_al[valid], b_al[valid]
+    n = int(len(a_al))
+    if n < req.window:                                  # not even one full window
+        return RollingCorrResponse(dates=[], corr=[], stress_windows=[], n_obs=n, status="insufficient_data")
+
+    rc = a_al.rolling(req.window).corr(b_al)
+    dates = [d.strftime("%Y-%m-%d") for d in a_al.index]
+    corr = [None if (v != v) else round(float(v), 4) for v in rc.values]  # v!=v -> NaN
+
+    stress_windows = []
+    if stress_mask is not None:
+        sm = list(stress_mask.reindex(a_al.index).fillna(False).values)
+        stress_windows = contiguous_true_ranges(sm, dates)
+
+    return RollingCorrResponse(dates=dates, corr=corr, stress_windows=stress_windows,
+                               n_obs=n, status="ok")
 
 
 @app.post("/api/data/refresh")

@@ -67,3 +67,22 @@ def regress_beta(port, bench, window, min_overlap=60):
     beta = float(np.cov(p, b)[0, 1] / var_b)
     corr = float(np.corrcoef(p, b)[0, 1])
     return round(beta, 4), round(corr * corr, 4), n
+
+
+def contiguous_true_ranges(flags, labels):
+    """Contiguous runs of True in `flags` -> [[labels[start], labels[end]], ...].
+    Used to turn the stress-day boolean mask into shaded [start,end] windows
+    (CORRELATION_COLUMN_SPEC.md §B). Never merges across a False gap."""
+    ranges = []
+    i = 0
+    n = len(flags)
+    while i < n:
+        if flags[i]:
+            j = i
+            while j + 1 < n and flags[j + 1]:
+                j += 1
+            ranges.append([labels[i], labels[j]])
+            i = j + 1
+        else:
+            i += 1
+    return ranges
