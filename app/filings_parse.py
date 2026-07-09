@@ -93,6 +93,70 @@ def html_to_text(fragment: str) -> str:
     return t.strip()
 
 
+_TOKEN_RE = re.compile(r"(?is)<script.*?</script>|<style.*?</style>|<[^>]+>|&[#0-9A-Za-z]+;|.")
+
+
+def html_to_text_with_map(fragment: str) -> tuple[str, list[int]]:
+    """
+    Like html_to_text but also returns raw_off: raw_off[k] is the index into
+    `fragment` that produced text[k]. Lets a text-space boundary (found by the
+    proven detection logic) map precisely back to raw HTML — needed to slice a
+    section's raw markup for risk-factor splitting on ANY filer, not just those
+    with TOC anchors.
+    """
+    out: list[str] = []
+    src: list[int] = []
+    for m in _TOKEN_RE.finditer(fragment):
+        tok = m.group(0)
+        pos = m.start()
+        low = tok.lower()
+        if tok.startswith("<"):
+            if low.startswith("<script") or low.startswith("<style"):
+                ch = " "
+            elif re.match(r"<br\s*/?>", low) or re.match(r"</(p|div|tr|h[1-6]|li|table)>", low):
+                ch = "\n"
+            else:
+                ch = " "
+            out.append(ch); src.append(pos)
+        elif tok.startswith("&"):
+            u = _html.unescape(tok)
+            u = " " if u == "\xa0" else u
+            for c in u:
+                out.append(c); src.append(pos)
+        else:
+            out.append(" " if tok == "\xa0" else tok); src.append(pos)
+
+    # Collapse whitespace, keeping the source index of the first char of each run.
+    text_chars: list[str] = []
+    off: list[int] = []
+    i, n = 0, len(out)
+    while i < n:
+        c = out[i]
+        if c in " \t":
+            j = i
+            while j < n and out[j] in " \t":
+                j += 1
+            text_chars.append(" "); off.append(src[i])
+            i = j
+        elif c == "\n":
+            j = i
+            while j < n and out[j] in " \t\n":
+                j += 1
+            text_chars.append("\n"); off.append(src[i])
+            i = j
+        else:
+            text_chars.append(c); off.append(src[i])
+            i += 1
+    text = "".join(text_chars)
+    start = 0
+    while start < len(text) and text[start] in " \n":
+        start += 1
+    end = len(text)
+    while end > start and text[end - 1] in " \n":
+        end -= 1
+    return text[start:end], off[start:end]
+
+
 # ── Anchor-based detection (primary) ─────────────────────────────────────────
 
 _TOC_LINK_RE = re.compile(
@@ -252,3 +316,97 @@ def parse_filing(doc: str, form: str, ticker: str = "", cik: int = 0,
         f"{[f'{i}:{s.status}({s.method})' for i, s in pf.sections.items()]}"
     )
     return pf
+
+
+# Common annual-report (Exhibit 13) section titles used to bound a target
+# section when a 10-K incorporates Item 1A / Item 7 by reference.
+AR_SECTION_TITLES = [
+    ("management", "discussion"),
+    ("quantitative", "qualitative"),
+    ("risk", "factor"),
+    ("controls", "procedures"),
+    ("financial", "statements"),
+    ("report", "independent"),
+    ("selected", "financial"),
+    ("consolidated", "balance"),
+]
+
+
+def locate_title_section_raw(doc: str, target: tuple, min_chars: int = 2000) -> str | None:
+    """
+    Locate a section in an annual-report exhibit by TITLE heading (no 'Item N'
+    prefix — banks carry Risk Factors / MD&A under plain titles). Among heading
+    lines matching `target`, choose the one whose body (bounded by the next
+    different AR-section title) is longest — the body beats the TOC copy.
+    """
+    text, off = html_to_text_with_map(doc)
+    xref = re.compile(r"(?i)refer to|\bsee\b|page\s+\d|incorporat|beginning on|pursuant to")
+    title_pos = []  # (pos, keyset)
+    for m in re.finditer(r"(?m)^[^\n]{3,85}$", text):
+        line = m.group().strip()
+        low = line.lower()
+        if xref.search(line):
+            continue  # a cross-reference sentence, not a section heading
+        for ks in AR_SECTION_TITLES:
+            if all(k in low for k in ks):
+                title_pos.append((m.start(), ks))
+                break
+    title_pos.sort()
+    cand = [p for p, ks in title_pos if ks == target]
+    if not cand:
+        return None
+    best, best_len = None, 0
+    for c in cand:
+        nxt = [p for p, ks in title_pos if p > c + min_chars and ks != target]
+        end = min(nxt) if nxt else len(text)
+        if end - c > best_len:
+            best_len, best = end - c, (c, end)
+    if best is None or best_len < min_chars:
+        return None
+    t0, t1 = best
+    return doc[off[t0]: off[t1] if t1 < len(off) else len(doc)]
+
+
+def locate_section_raw(doc: str, form: str, item: str) -> str | None:
+    """
+    Return the RAW HTML slice for a target section (for risk-factor splitting),
+    or None if it can't be confidently located. Anchor spans are raw-space
+    already; otherwise map the winning text-space heading boundary back to raw
+    via the offset map so heading-only filers (DKS, O) work too.
+    """
+    targets = TARGET_ITEMS.get(form, {})
+    if item not in targets:
+        return None
+    _title, keywords = targets[item]
+
+    # 1) Anchor: raw offsets directly.
+    ordered = _anchor_sections(doc)
+    for idx, s in enumerate(ordered):
+        if s["item"] == item:
+            start = s["offset"]
+            end = ordered[idx + 1]["offset"] if idx + 1 < len(ordered) else len(doc)
+            head = html_to_text(doc[start:end])[:400].lower()
+            if head.lstrip().startswith("item") and any(k in head for k in keywords):
+                return doc[start:end]
+
+    # 2) Heading: locate in text space (longest bounded body), map to raw.
+    text, off = html_to_text_with_map(doc)
+    heads = []
+    for m in re.finditer(r"(?im)^\s*Item\s+(\d+[A-Za-z]?)[\.\:\)\s—-]+([A-Z][^\n]{0,80})", text):
+        heads.append({"item": m.group(1).upper(), "start": m.start(), "header": m.group(0)})
+    heads.sort(key=lambda h: h["start"])
+    starts = [h["start"] for h in heads]
+    best = None
+    for i, h in enumerate(heads):
+        if h["item"] != item or not any(k in h["header"].lower() for k in keywords):
+            continue
+        t0 = h["start"]
+        t1 = starts[i + 1] if i + 1 < len(starts) else len(text)
+        if best is None or (t1 - t0) > (best[1] - best[0]):
+            best = (t0, t1)
+    if best is None:
+        return None
+    t0, t1 = best
+    r0 = off[t0]
+    r1 = off[t1] if t1 < len(off) else len(doc)
+    return doc[r0:r1]

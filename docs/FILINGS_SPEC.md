@@ -101,3 +101,7 @@ Implementation terms (sealed):
 - Retrieval is abstraction-first: a single `search(query, ticker, k)` contract with the scorer behind it. TF-IDF (scikit-learn, already installed) + cosine top-k is the default implementation.
 - If sentence-transformers is installed, an ST implementation may be selected by config — but that dependency goes in `requirements-dev.txt` (or an extras group), NEVER base `requirements.txt` or the Docker image. Free-tier deploy stays light.
 - Anchor-based boundary detection approved as reconnoitered against AAPL FY2025 10-K: TOC-anchor primary, heading-context fallback, UNPARSED as the sealed failure behavior.
+
+### Amendment 2 (Phase 2) — extractive summaries by design
+
+Business summary and MD&A distillation are extractive-with-citations by design; structurally immune to uncited-claim failures; Claude generation deferred to Phase 3's Q&A under the sealed answer contract, revisitable only on jury evidence that extraction reads inadequately.

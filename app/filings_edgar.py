@@ -15,6 +15,7 @@ Nothing is fetched at import time; everything is lazy per-ticker.
 import json
 import logging
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -186,3 +187,50 @@ def fetch_document(ref: FilingRef, refresh: bool = False) -> str:
         ("raw", str(ref.cik), ref.acc_nodash, ref.primary_doc),
         refresh=refresh,
     )
+
+
+# ── Exhibit discovery (Phase 2 — incorporation-by-reference chase) ────────────
+
+def _index_htm_url(ref: FilingRef) -> str:
+    return (f"https://www.sec.gov/Archives/edgar/data/{ref.cik}/"
+            f"{ref.acc_nodash}/{ref.accession}-index.htm")
+
+
+def find_exhibit(ref: FilingRef, types: tuple[str, ...] = ("EX-13",),
+                 refresh: bool = False) -> tuple[str, str] | None:
+    """
+    Locate an exhibit document within the SAME accession by SEC document type,
+    using the authoritative `-index.htm` type table (index.json's `type` field
+    is unreliable — it carries icon names, not EX-13). Returns (doc_name, type)
+    or None. Used to chase Item 1A/7 content that a 10-K incorporates by
+    reference (banks/insurers → Annual Report / Exhibit 13). Verified on USB.
+    """
+    raw = _cached_text(_index_htm_url(ref), "www.sec.gov",
+                       ("meta", "acc_index", f"{ref.acc_nodash}.htm"), refresh=refresh)
+    for row in re.findall(r"(?is)<tr[^>]*>(.*?)</tr>", raw):
+        cells = [re.sub(r"(?s)<[^>]+>", " ", c).strip()
+                 for c in re.findall(r"(?is)<td[^>]*>(.*?)</td>", row)]
+        joined = " ".join(cells)
+        if not any(t.upper() in joined.upper() for t in types):
+            continue
+        link = re.search(r'href="[^"]*?/([^"/]+\.htm[l]?)"', row, re.I)
+        if link:
+            matched_type = next((t for t in types if t.upper() in joined.upper()), types[0])
+            return link.group(1), matched_type
+    return None
+
+
+def fetch_named_document(ref: FilingRef, doc_name: str, refresh: bool = False) -> str:
+    """Fetch an arbitrary document by name from a filing's accession (cached)."""
+    url = ARCHIVES_URL.format(cik=ref.cik, acc_nodash=ref.acc_nodash, doc=doc_name)
+    return _cached_text(url, "www.sec.gov",
+                        ("raw", str(ref.cik), ref.acc_nodash, doc_name), refresh=refresh)
+
+
+def fetch_companyfacts(cik: int, refresh: bool = False) -> dict:
+    """EDGAR XBRL companyfacts (structured financial facts), cached."""
+    cik10 = f"{cik:010d}"
+    raw = _cached_text(
+        f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik10}.json",
+        "data.sec.gov", ("meta", f"companyfacts_{cik10}.json"), refresh=refresh)
+    return json.loads(raw)

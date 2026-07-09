@@ -393,6 +393,11 @@ class BatchAnalysisResponse(BaseModel):
     total_completed: int
 
 
+class FilingsRequest(BaseModel):
+    ticker: str = Field(..., min_length=1, max_length=10)
+    refresh: bool = False
+
+
 class SectorAnalysisResponse(BaseModel):
     sector: str
     pestel: dict

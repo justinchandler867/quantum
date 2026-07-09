@@ -50,6 +50,7 @@ from app.models import (
     CompanyAnalysisResponse,
     BatchAnalysisResponse,
     SectorAnalysisResponse,
+    FilingsRequest,
     TradeRequest,
     TradeResponse,
     PositionResponse,
@@ -1743,6 +1744,27 @@ async def analyze_sector_endpoint(sector: str, api_key: str):
         sector=result.sector, pestel=result.pestel, porters=result.porters,
         sector_outlook=result.sector_outlook, key_trends=result.key_trends,
     )
+
+
+# ── Filings & Qualitative Intelligence (FILINGS_SPEC Phase 2) ─────────────────
+
+from fastapi.concurrency import run_in_threadpool
+from app.filings_service import build_filings_view
+
+
+@app.post("/api/filings")
+async def filings_view(req: FilingsRequest):
+    """
+    Per-ticker Filings tab payload from SEC EDGAR: Findings/"What changed" block,
+    YoY risk-factor diff, business summary, MD&A distillation, financial facts —
+    every claim carrying a citation that resolves to the source passage.
+    Lazy + cached per ticker (first call fetches from EDGAR).
+    """
+    try:
+        return await run_in_threadpool(build_filings_view, req.ticker, req.refresh)
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Filings view failed for {req.ticker}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Filings view failed: {e}")
 
 
 # ── Paper Trading Endpoints ───────────────────────────────────────────────────

@@ -1217,6 +1217,117 @@ function xTickIndices(n,target=6){
 }
 
 // ── Single-Ticker Chart Modal (Discovery row click) ──────────────────────────
+// ── Filings & Qualitative Intelligence panel (FILINGS_SPEC Phase 2) ──────────
+// Leads with the Findings / "What changed" block. Every claim carries a
+// citation chip that opens the source passage. No verdicts — reports only what
+// the company disclosed.
+function FilingsPanel({ticker,name}){
+  const[d,setD]=useState(null);
+  const[loading,setLoading]=useState(false);
+  const[err,setErr]=useState(null);
+  const[cite,setCite]=useState(null);
+
+  const load=()=>{
+    setLoading(true);setErr(null);
+    apiFetch("/api/filings",{ticker},180000)
+      .then(setD).catch(ex=>setErr(ex.message||"Failed to load filings"))
+      .finally(()=>setLoading(false));
+  };
+
+  const cmap=(d&&d.citations)||{};
+  const fmtUSD=v=>{const a=Math.abs(v),s=v<0?"-":"";
+    if(a>=1e12)return s+"$"+(a/1e12).toFixed(2)+"T";
+    if(a>=1e9)return s+"$"+(a/1e9).toFixed(2)+"B";
+    if(a>=1e6)return s+"$"+(a/1e6).toFixed(1)+"M";
+    return s+"$"+Math.round(a).toLocaleString();};
+  const chip=(cid,i)=>{const c=cmap[cid];if(!c)return null;
+    return e("button",{key:(cid+"_"+(i||0)),onClick:()=>setCite(cid),title:"View source passage",
+      style:{display:"inline-block",background:"rgba(99,102,241,.14)",border:"1px solid rgba(99,102,241,.35)",
+        color:"#a5b4fc",fontSize:9,borderRadius:4,padding:"0 5px",margin:"0 2px",cursor:"pointer",
+        fontFamily:"'JetBrains Mono',monospace",lineHeight:1.6,verticalAlign:"middle"}},
+      (c.item?("Item "+c.item):"src")+" ›");};
+  const chips=arr=>(arr||[]).map((cid,i)=>chip(cid,i));
+  const sec=(title,children)=>e("div",{style:{marginTop:14,borderTop:"1px solid #1a2540",paddingTop:10}},
+    e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",letterSpacing:.5,marginBottom:8}},title),children);
+  const rfList=(label,items,color,priorKey)=>items&&items.length>0&&e("div",{style:{marginBottom:8}},
+    e("div",{style:{fontSize:10,fontWeight:700,color:color,letterSpacing:.5,marginBottom:4}},label+" ("+items.length+")"),
+    items.map((it,i)=>e("div",{key:i,style:{fontSize:11,color:"#cbd5e1",lineHeight:1.45,marginBottom:4,paddingLeft:8,borderLeft:"2px solid "+color}},
+      it.heading, priorKey&&it.body_similarity!=null?e("span",{style:{color:"#64748b"}}," (similarity "+it.body_similarity+")"):null,
+      " ",chip(it.citation),it.prior_citation?chip(it.prior_citation,1):null)));
+
+  const content=()=>{
+    if(d.status==="unsupported_foreign"||d.status==="no_data")
+      return e("div",{style:{fontSize:12,color:"#94a3b8",padding:"10px 0",lineHeight:1.5}},d.message);
+    const rd=d.risk_diff||{};
+    return e("div",null,
+      // Sealed header copy
+      e("div",{style:{fontSize:10,color:"#64748b",fontStyle:"italic",lineHeight:1.5,marginBottom:10}},d.header),
+      // §2a Findings / What changed — LEADS the tab
+      e("div",{style:{background:"rgba(99,102,241,.06)",border:"1px solid rgba(99,102,241,.25)",borderRadius:8,padding:"12px 14px"}},
+        e("div",{style:{fontSize:12,fontWeight:700,color:"#c7d2fe",marginBottom:8,letterSpacing:.5}},"WHAT CHANGED"),
+        d.findings_null
+          ? e("div",{style:{fontSize:12,color:"#94a3b8"}},"No material changes detected vs prior filing.")
+          : d.findings.map((f,i)=>e("div",{key:i,style:{marginBottom:9}},
+              e("div",{style:{fontSize:12.5,color:"#e2e8f0",fontWeight:600,lineHeight:1.4}},f.headline," ",chips(f.citations)),
+              f.detail&&e("div",{style:{fontSize:10.5,color:"#94a3b8",marginTop:3,lineHeight:1.45}},f.detail)))
+      ),
+      // Risk factors YoY diff
+      sec("RISK FACTORS — YEAR OVER YEAR",
+        !rd.available
+          ? e("div",{style:{fontSize:11,color:"#f59e0b",fontStyle:"italic",lineHeight:1.5}},rd.reason)
+          : e("div",null,
+              rd.counts&&e("div",{style:{fontSize:10,color:"#64748b",marginBottom:8}},
+                "Current "+rd.counts.current+" vs prior "+rd.counts.prior+" risk factors."),
+              rfList("ADDED",rd.added,"#1D9E75"),
+              rfList("REMOVED",rd.removed,"#ef4444"),
+              rfList("MATERIALLY CHANGED",rd.changed,"#f59e0b",true))),
+      // Business summary
+      d.business_summary&&d.business_summary.length>0&&sec("BUSINESS SUMMARY",
+        d.business_summary.map((s,i)=>e("div",{key:i,style:{fontSize:12,color:"#cbd5e1",lineHeight:1.55,marginBottom:6}},
+          "“"+s.text+"” ",chip(s.citation)))),
+      // MD&A distillation
+      d.mdna&&d.mdna.length>0&&sec("MANAGEMENT’S DISCUSSION (MD&A)",
+        d.mdna.map((s,i)=>e("div",{key:i,style:{fontSize:11.5,color:"#cbd5e1",lineHeight:1.55,marginBottom:6}},
+          e("span",{style:{color:"#64748b"}},"❝ "),s.text," ",chip(s.citation)))),
+      // Financial facts
+      d.financial_facts&&d.financial_facts.length>0&&sec("FINANCIAL FACTS (as reported)",
+        e("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:11}},
+          e("tbody",null,d.financial_facts.map((f,i)=>e("tr",{key:i,style:{borderBottom:"1px solid #0f1830"}},
+            e("td",{style:{padding:"4px 6px",color:"#94a3b8"}},f.label),
+            e("td",{style:{padding:"4px 6px",color:"#e2e8f0",textAlign:"right",fontFamily:"'JetBrains Mono',monospace"}},fmtUSD(f.value)),
+            e("td",{style:{padding:"4px 6px",color:"#64748b",textAlign:"right"}},f.period_end),
+            e("td",{style:{padding:"4px 6px",color:"#475569",fontSize:9}},f.source)))))),
+      // Filing inventory (surfaces UNPARSED honestly)
+      d.filings&&d.filings.length>0&&sec("SOURCE FILINGS",
+        d.filings.map((inv,i)=>e("div",{key:i,style:{fontSize:10,color:"#64748b",marginBottom:4,lineHeight:1.5}},
+          e("span",{style:{color:"#94a3b8",fontFamily:"'JetBrains Mono',monospace"}},inv.form+" "+inv.filing_date),
+          "  ",
+          Object.keys(inv.sections).map(it=>e("span",{key:it,style:{marginRight:8,color:inv.sections[it].status==="PARSED"?"#64748b":"#f59e0b"}},
+            "Item "+it+": "+(inv.sections[it].status==="PARSED"?inv.sections[it].method:inv.sections[it].status)))
+        ))),
+      // Citation passage modal
+      cite&&cmap[cite]&&e("div",{onClick:()=>setCite(null),style:{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:1300,display:"flex",alignItems:"center",justifyContent:"center",padding:20}},
+        e("div",{onClick:ev=>ev.stopPropagation(),style:{background:"#0b0f1e",border:"1px solid rgba(99,102,241,.25)",borderRadius:10,maxWidth:600,width:"100%",padding:16,position:"relative"}},
+          e("button",{onClick:()=>setCite(null),style:{position:"absolute",top:8,right:10,background:"none",border:"none",color:"#94a3b8",fontSize:18,cursor:"pointer"}},"✕"),
+          e("div",{style:{fontSize:10,color:"#a5b4fc",fontFamily:"'JetBrains Mono',monospace",marginBottom:8,letterSpacing:.5}},
+            (cmap[cite].form||"")+" · "+(cmap[cite].filing_date||"")+(cmap[cite].item?(" · Item "+cmap[cite].item):"")+(cmap[cite].title?(" — "+cmap[cite].title):"")),
+          e("div",{style:{fontSize:9,color:"#475569",marginBottom:10,wordBreak:"break-all"}},"Source: "+(cmap[cite].source_doc||"")),
+          e("div",{style:{fontSize:12,color:"#cbd5e1",lineHeight:1.6,maxHeight:"50vh",overflowY:"auto"}},cmap[cite].quote||"(passage)"))
+      )
+    );
+  };
+
+  return e("div",{style:{marginTop:16,borderTop:"1px solid #1a2540",paddingTop:12}},
+    e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}},
+      e("div",{style:{fontSize:11,fontWeight:700,color:"#a5b4fc",letterSpacing:.5}},"SEC FILINGS ANALYSIS"),
+      !d&&!loading&&e("button",{className:"btn btn-xs btn-p",onClick:load},"Load filings →"),
+      d&&e("button",{className:"btn btn-xs",onClick:load,title:"Re-fetch"},"↻")),
+    loading&&e("div",{style:{color:"#475569",fontSize:11,textAlign:"center",padding:"14px 0"}},e("span",{className:"spin"},"◌")," Analyzing SEC filings…"),
+    err&&e("div",{className:"warn-box"},"⚠ "+err),
+    d&&content()
+  );
+}
+
 function TickerChart({ticker,name,onClose}){
   const[range,setRange]=useState("1Y");
   const[ind,setInd]=useState({sma20:false,sma50:false,sma200:false,ema12:false,ema26:false,bb:false,vwap:false,macd:false,rsi:false,stoch:false,roc:false});
@@ -1631,7 +1742,8 @@ function TickerChart({ticker,name,onClose}){
           )
         ),
         !newsLoading&&news&&news.length>5&&!showAllNews&&e("button",{onClick:()=>setShowAllNews(true),style:{background:"none",border:"none",color:"#a5b4fc",fontSize:11,cursor:"pointer",marginTop:6,padding:"6px 0",fontFamily:"'DM Sans',sans-serif"}},"Show all "+news.length+" →")
-      )
+      ),
+      e(FilingsPanel,{ticker,name})
       ),
       e("div",{onMouseDown:onHandleDown,title:"Drag to resize",style:{position:"absolute",right:4,bottom:4,width:16,height:16,cursor:"nwse-resize",opacity:.6,zIndex:1}},
         e("svg",{width:16,height:16,viewBox:"0 0 16 16",style:{display:"block"}},
