@@ -87,3 +87,17 @@ STOP conditions: EDGAR access blocked or ToS-relevant surprises; parse success r
 
 
 Phase commits: one commit per phase, each behind its own audit gate. Phase order is strict: 0 → 1 → (2 + harness) → 3.
+
+
+---
+
+## Amendments
+
+### Amendment 1 (Phase 1) — embedding-stack premise corrected
+
+Phase 1 spec premise corrected — the referenced RAG stack is not in this repo. Embedding layer: TF-IDF default via a scorer-agnostic retrieval interface; sentence-transformers optional/dev-only. The Phase 3 groundedness harness is the arbiter: if TF-IDF retrieval causes harness failures that ST demonstrably fixes, upgrading the default becomes a recorded decision at that gate — not before, not by assumption.
+
+Implementation terms (sealed):
+- Retrieval is abstraction-first: a single `search(query, ticker, k)` contract with the scorer behind it. TF-IDF (scikit-learn, already installed) + cosine top-k is the default implementation.
+- If sentence-transformers is installed, an ST implementation may be selected by config — but that dependency goes in `requirements-dev.txt` (or an extras group), NEVER base `requirements.txt` or the Docker image. Free-tier deploy stays light.
+- Anchor-based boundary detection approved as reconnoitered against AAPL FY2025 10-K: TOC-anchor primary, heading-context fallback, UNPARSED as the sealed failure behavior.

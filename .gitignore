@@ -16,3 +16,6 @@ venv/
 
 # Backtest cached price/dividend history (large, re-fetchable via backtest/fetch_data.py)
 backtest/data/
+
+# SEC EDGAR filings cache + local index (large; lazily re-fetchable per ticker)
+filings_cache/

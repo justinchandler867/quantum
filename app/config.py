@@ -97,3 +97,30 @@ FUNDAMENTAL_CACHE_TTL = 60 * 60 * 24 * 7  # 7 days — fundamentals change slowl
 SECTOR_ANALYSIS_REFRESH_DAYS = 90  # quarterly refresh
 
 
+# ── SEC EDGAR (Filings & Qualitative Intelligence epic — FILINGS_SPEC) ────────
+# Declared User-Agent with contact info is required by SEC policy. Override via
+# env in production if desired.
+SEC_USER_AGENT = os.environ.get(
+    "SEC_USER_AGENT",
+    "Quantex Research (educational; contact justin.chandler867@gmail.com)",
+)
+# SEC guidance is ~10 req/s; keep a minimum spacing safely under that.
+SEC_MIN_REQUEST_INTERVAL = 0.15  # seconds between SEC requests (~6-7 req/s)
+
+# On-disk cache for fetched filings + local index. Gitignored; lazily rebuilt
+# per ticker. Nothing is fetched at import time.
+FILINGS_CACHE_DIR = os.environ.get(
+    "FILINGS_CACHE_DIR",
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "filings_cache"),
+)
+
+# Retrieval backend (Amendment 1): "tfidf" (default, base deps) or
+# "sentence-transformers" (optional, dev/extras only — never base requirements).
+FILINGS_RETRIEVAL_BACKEND = os.environ.get("FILINGS_RETRIEVAL_BACKEND", "tfidf")
+FILINGS_ST_MODEL = os.environ.get("FILINGS_ST_MODEL", "all-MiniLM-L6-v2")
+
+# Chunking: a chunk is small enough to cite, large enough to read (~1-3 paras).
+FILINGS_CHUNK_MIN_CHARS = 500
+FILINGS_CHUNK_MAX_CHARS = 2000
+
+
