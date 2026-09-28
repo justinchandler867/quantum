@@ -15,4 +15,5 @@ COPY static/ ./static/
 
 # Run with uvicorn
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# One worker: paper trades and price data live in per-process memory (2 workers split state across requests), and 2 workers risk exceeding the 512MB free instance.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

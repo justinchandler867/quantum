@@ -1352,6 +1352,10 @@ function TickerChart({ticker,name,onClose}){
   const[dragging,setDragging]=useState(false);
   const dragStart=useRef({x:0,y:0,w:0,h:0});
   const justDragged=useRef(false);
+  // Visible entry point to the SEC Filings panel at the bottom of this modal
+  // (below chart, indicators, news). Scrolls the same FilingsPanel into view;
+  // loading stays an explicit click inside the panel.
+  const filingsRef=useRef(null);
 
   const wantVolume=ind.vwap;
 
@@ -1681,7 +1685,10 @@ function TickerChart({ticker,name,onClose}){
           name&&e("div",{style:{fontSize:11,color:"#64748b",marginTop:2}},name),
           data&&e("div",{style:{fontSize:10,color:"#64748b",marginTop:4}},"Range: "+data.start_date+" – "+data.end_date)
         ),
-        e("button",{onClick:onClose,title:"Close (Esc)",style:{background:"none",border:"none",color:"#94a3b8",fontSize:20,cursor:"pointer",padding:"2px 8px",lineHeight:1}},"✕")
+        e("div",{style:{display:"flex",alignItems:"center",gap:8}},
+          e("button",{className:"btn btn-xs btn-p",title:"Jump to SEC filings analysis for "+ticker,onClick:()=>{if(filingsRef.current)filingsRef.current.scrollIntoView({behavior:"smooth",block:"start"});}},"SEC Filings ↓"),
+          e("button",{onClick:onClose,title:"Close (Esc)",style:{background:"none",border:"none",color:"#94a3b8",fontSize:20,cursor:"pointer",padding:"2px 8px",lineHeight:1}},"✕")
+        )
       ),
       e("div",{style:{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}},
         RANGES.map(([v,l])=>e("button",{key:v,className:"btn btn-xs"+(range===v?" btn-p":""),onClick:()=>setRange(v),style:{fontSize:10}},l)),
@@ -1743,7 +1750,7 @@ function TickerChart({ticker,name,onClose}){
         ),
         !newsLoading&&news&&news.length>5&&!showAllNews&&e("button",{onClick:()=>setShowAllNews(true),style:{background:"none",border:"none",color:"#a5b4fc",fontSize:11,cursor:"pointer",marginTop:6,padding:"6px 0",fontFamily:"'DM Sans',sans-serif"}},"Show all "+news.length+" →")
       ),
-      e(FilingsPanel,{ticker,name})
+      e("div",{ref:filingsRef},e(FilingsPanel,{ticker,name}))
       ),
       e("div",{onMouseDown:onHandleDown,title:"Drag to resize",style:{position:"absolute",right:4,bottom:4,width:16,height:16,cursor:"nwse-resize",opacity:.6,zIndex:1}},
         e("svg",{width:16,height:16,viewBox:"0 0 16 16",style:{display:"block"}},
