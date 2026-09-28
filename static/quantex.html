@@ -4175,7 +4175,8 @@ function App({user,logout}){
     {id:"metrics",l:"METRICS",lk:locked},
     {id:"corr",l:"CORRELATIONS",lk:locked},
     {id:"frontier",l:"FRONTIER",lk:locked},
-    {id:"trades",l:"TRADE DESK",lk:locked},
+    // DEMO GATE — Trade Desk hidden pending TRADE_DESK_SPEC design decision
+    ...(window.QX_DEMO_MODE?[]:[{id:"trades",l:"TRADE DESK",lk:locked}]),
     {id:"deriv",l:"⚡ DERIVATIVES",lk:false},
     {id:"paper",l:"📄 PAPER TRADE",lk:false},
     {id:"learn",l:"📚 LEARN",lk:false},
@@ -4206,7 +4207,8 @@ function App({user,logout}){
         tab==="metrics"&&e(Metrics,{weights:aw}),
         tab==="corr"&&e(Correlations,{weights:aw,profile,backendOk}),
         tab==="frontier"&&e(Frontier,{weights:aw,profile,backendOk}),
-        tab==="trades"&&e(TradeDeck,{weights:aw,profile}),
+        // DEMO GATE — Trade Desk hidden pending TRADE_DESK_SPEC design decision
+        !window.QX_DEMO_MODE&&tab==="trades"&&e(TradeDeck,{weights:aw,profile}),
         tab==="deriv"&&e(DerivativesSandbox,{backendOk}),
         tab==="paper"&&e(PaperTrading,{backendOk}),
         tab==="learn"&&e(Learn,{profile,ports,activePort:ap}),

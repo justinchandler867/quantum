@@ -98,6 +98,7 @@ from app.correlation_engine import (
 from app.cache import cache_key, cache_get, cache_set
 from app.discovery_context import compute_candidate_context, MIN_OVERLAP_DAYS
 from app.portfolio_series import weighted_portfolio_returns, regress_beta, contiguous_true_ranges
+from app.demo_gate import demo_gate_middleware, demo_mode, demo_password
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -124,6 +125,8 @@ _store_lock = threading.Lock()
 async def lifespan(app: FastAPI):
     """Startup: log readiness. Data is loaded lazily on first request."""
     logger.info("Quantex backend starting — data will load on first request")
+    if not demo_password():
+        logger.info("Demo auth gate INACTIVE: DEMO_PASSWORD unset or empty; all routes open")
     yield
     logger.info("Quantex backend shutting down")
 
@@ -142,6 +145,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Registered after CORS so it is the outermost layer: every route (frontend,
+# /api/*, /docs) passes through it; /health is exempt for Render health checks.
+# Inactive when DEMO_PASSWORD is unset.
+app.middleware("http")(demo_gate_middleware)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -2200,7 +2208,11 @@ async def serve_frontend():
     """Serve the Quantex frontend."""
     html_path = STATIC_DIR / "quantex.html"
     if html_path.exists():
-        return HTMLResponse(content=html_path.read_text(), status_code=200)
+        html = html_path.read_text()
+        if demo_mode():
+            # DEMO GATE — flag injected synchronously so the Trade Desk never flashes in.
+            html = html.replace("<head>", "<head>\n<script>window.QX_DEMO_MODE=true;</script>", 1)
+        return HTMLResponse(content=html, status_code=200)
     return HTMLResponse(
         content="<h1>Quantex</h1><p>Place quantex.html in backend/static/ to serve the frontend.</p>",
         status_code=200,
