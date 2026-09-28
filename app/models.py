@@ -113,6 +113,25 @@ class PortfolioBetaRequest(BaseModel):
     benchmark: str = Field("SPY", description="v1 default SPY; multi-benchmark out of scope")
 
 
+class PortfolioHealthRequest(BaseModel):
+    """PORTFOLIO_RISK_SPEC §8 Portfolio Health panel."""
+    holdings: list[HoldingInput] = Field(default_factory=list)
+    window: int = Field(252, ge=60, le=1260)
+
+
+class PortfolioPreviewRequest(BaseModel):
+    """PORTFOLIO_RISK_SPEC §2 marginal ΔVol preview: current vs proposed weights."""
+    holdings: list[HoldingInput] = Field(default_factory=list)
+    proposed: list[HoldingInput] = Field(default_factory=list)
+    window: int = Field(252, ge=60, le=1260)
+
+
+class RedundancyRequest(BaseModel):
+    """PORTFOLIO_RISK_SPEC §5 candidate redundancy flags (pairwise, shortlist only)."""
+    candidates: list[str] = Field(..., min_length=1, max_length=100)
+    window: int = Field(252, ge=60, le=1260)
+
+
 class PortfolioBetaResponse(BaseModel):
     beta: float | None
     r2: float | None

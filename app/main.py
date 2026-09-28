@@ -23,6 +23,7 @@ from app.config import (
     REFERENCE_HEDGES,
     RISK_FREE_RATE,
     BETA_BENCHMARK,
+    HIGH_CORR_THRESHOLD,
 )
 from app.models import (
     CorrelationRequest,
@@ -2194,6 +2195,94 @@ async def ai_chat(body: dict):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"AI proxy error: {exc}")
+
+
+# ── Portfolio risk context layer (PORTFOLIO_RISK_SPEC.md + Amendment A §8) ────
+# Consumes the shared returns frame, the shared value-weighted helper, the
+# shipped Ledoit-Wolf estimator and the beta regression — no shipped compute
+# path is modified. The ranker is not touched.
+from app.portfolio_risk import (
+    normalize_weights, portfolio_health as _portfolio_health, redundancy_pairs,
+    risk_decomposition, select_window, trailing_yield, weighted_yield,
+)
+from app.models import PortfolioHealthRequest, PortfolioPreviewRequest, RedundancyRequest
+
+
+def _j2_yield(ticker: str):
+    """Trailing-12m dividends / latest raw close (J2), cached per ticker. None on failure."""
+    ck = f"yield_j2:{ticker}"
+    hit = cache_get(ck)
+    if hit is not None:
+        return hit.get("y")
+    y = None
+    try:
+        hist = yf.Ticker(ticker).history(period="13mo", auto_adjust=False)
+        if hist is not None and not hist.empty and "Close" in hist.columns:
+            y = trailing_yield(hist["Dividends"] if "Dividends" in hist.columns else None, hist["Close"])
+    except Exception as exc:
+        logger.debug(f"yield fetch failed for {ticker}: {exc}")
+    cache_set(ck, {"y": y}, CACHE_TTL_DAILY)
+    return y
+
+
+def _vol_beta(returns, holdings: dict, window: int) -> dict:
+    """σ_P from the §1 engine and β exactly as /api/portfolio/beta computes it."""
+    w = normalize_weights(holdings)
+    if not w:
+        return {"vol": None, "beta": None, "excluded": []}
+    sub, inc, exc = select_window(returns, w, window, MIN_OVERLAP_DAYS)
+    vol = risk_decomposition(sub, {t: w[t] for t in inc})["sigma"] if sub is not None else None
+    beta = None
+    port = weighted_portfolio_returns(returns, holdings)
+    if port is not None and BETA_BENCHMARK in returns.columns:
+        beta, _, _ = regress_beta(port, returns[BETA_BENCHMARK], window, min_overlap=MIN_OVERLAP_DAYS)
+    return {"vol": vol, "beta": beta, "excluded": [x["ticker"] for x in exc]}
+
+
+@app.post("/api/portfolio/health")
+async def portfolio_health_endpoint(req: PortfolioHealthRequest):
+    """§8 Portfolio Health panel payload (see app/portfolio_risk.py)."""
+    holdings = {h.ticker: h.weight for h in req.holdings}
+    if not normalize_weights(holdings):
+        return {"status": "empty"}
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, _ensure_data, list(holdings) + [BETA_BENCHMARK])
+    out = _portfolio_health(_store["returns"], holdings, benchmark=BETA_BENCHMARK, rf=RISK_FREE_RATE,
+                            window=req.window, min_obs=MIN_OVERLAP_DAYS, capture_min_obs=MIN_OVERLAP_DAYS)
+    wn = normalize_weights(holdings)
+    yields = {}
+    for t in wn:
+        yields[t] = await loop.run_in_executor(None, _j2_yield, t)
+    out["yield"] = weighted_yield(yields, wn)
+    return out
+
+
+@app.post("/api/portfolio/preview")
+async def portfolio_preview(req: PortfolioPreviewRequest):
+    """
+    §2 marginal preview: σ_P (and β, line two) at current vs proposed weights,
+    each computed by the full engine on its own weights — no approximation.
+    Reads the already-loaded returns frame only: a hover must never trigger a
+    universe re-fetch. Tickers not loaded are reported, never guessed.
+    """
+    returns = _store["returns"]
+    if returns is None:
+        return {"status": "not_loaded", "current": None, "proposed": None}
+    cur = _vol_beta(returns, {h.ticker: h.weight for h in req.holdings}, req.window)
+    prop = _vol_beta(returns, {h.ticker: h.weight for h in req.proposed}, req.window)
+    return {"status": "ok", "current": cur, "proposed": prop, "window": req.window}
+
+
+@app.post("/api/discovery/redundancy")
+async def discovery_redundancy(req: RedundancyRequest):
+    """
+    §5 candidate redundancy flags: pairwise Pearson correlation among shortlist
+    candidates (≤100) over the trailing window; flags each candidate whose most
+    correlated shortlist peer is at r ≥ HIGH_CORR_THRESHOLD (config.py). Reads
+    the loaded frame only; never reorders or rescores candidates.
+    """
+    return redundancy_pairs(_store["returns"], req.candidates, HIGH_CORR_THRESHOLD,
+                            window=req.window, min_obs=MIN_OVERLAP_DAYS)
 
 
 # ── Serve Frontend ───────────────────────────────────────────────────────────

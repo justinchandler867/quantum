@@ -799,6 +799,10 @@ function Discovery({profile,ports,onAdd}){
   const corrCacheRef=useRef({});                          // { [port]: {key,loading,error,map} }
   const corrChipRef=useRef(null);
   const[spyRefState,setSpyRefState]=useState(null);       // derived SPY 1Y Sharpe (when not in row set)
+  // PORTFOLIO_RISK_SPEC §2: ΔVol preview on hover of an add/remove button; §5 redundancy flags.
+  const[hoverAdd,setHoverAdd]=useState(null);             // {pn,id} under the pointer
+  const[hoverData,setHoverData]=useState(null);
+  const[redund,setRedund]=useState(null);                 // {map,threshold} | {error}
 
   useEffect(()=>{
     if(skipNextSearch.current){skipNextSearch.current=false;return;}
@@ -871,6 +875,37 @@ function Discovery({profile,ports,onAdd}){
     return()=>{cancelled=true;};
   },[corrSel,holdingsKey,candKey]);
   const corrState=corrSel?corrCacheRef.current[corrSel]:null;
+  // §2 preview: the proposed weights are exactly what the click applies
+  // (App.togglePort -> addToPort/rmFromPort -> addWeights/removeWeights).
+  const hoverReq=useMemo(()=>{
+    if(!hoverAdd)return null;
+    const cur=ports[hoverAdd.pn]||{};const held=cur[hoverAdd.id]!==undefined;
+    const prop=held?removeWeights(cur,hoverAdd.id):addWeights(cur,hoverAdd.id);
+    const ctx=held?{kind:"remove",id:hoverAdd.id,n:Object.keys(prop).length}:{kind:"add",id:hoverAdd.id,w:prop[hoverAdd.id],n:Object.keys(prop).length};
+    return{pn:hoverAdd.pn,cur,prop,ctx};
+  },[hoverAdd,ports]);
+  const hoverKey=hoverReq?JSON.stringify([hoverReq.cur,hoverReq.prop]):"";
+  useEffect(()=>{
+    setHoverData(null);
+    if(!hoverReq)return;
+    const toH=w=>Object.entries(w).filter(([,x])=>x>0).map(([ticker,weight])=>({ticker,weight}));
+    let cancelled=false;
+    const t=setTimeout(()=>{
+      apiFetch("/api/portfolio/preview",{holdings:toH(hoverReq.cur),proposed:toH(hoverReq.prop)})
+        .then(d=>{if(!cancelled)setHoverData(d);}).catch(()=>{if(!cancelled)setHoverData(null);});
+    },250);
+    return()=>{cancelled=true;clearTimeout(t);};
+  },[hoverKey]);
+  // §5: one batched call per shortlist; flags only annotate rows, never reorder them.
+  useEffect(()=>{
+    const cands=ASSETS.map(x=>x.id).slice(0,100);
+    if(cands.length<2){setRedund(null);return;}
+    let cancelled=false;
+    apiFetch("/api/discovery/redundancy",{candidates:cands,window:252})
+      .then(d=>{if(cancelled)return;const map={};(d.flags||[]).forEach(f=>{map[f.ticker]=f;});setRedund({map,threshold:d.threshold,window:d.window});})
+      .catch(()=>{if(!cancelled)setRedund({error:true,map:{}});});
+    return()=>{cancelled=true;};
+  },[candKey]);
   const corrErr=corrState&&corrState.error;
 
   const fetchTicker=async sym=>{
@@ -998,8 +1033,12 @@ function Discovery({profile,ports,onAdd}){
         )
       ),
       corrSel&&corrState&&corrState.loading&&e("span",{style:{fontSize:10,color:"#64748b"}},e("span",{className:"spin"},"◌")," loading correlations…"),
-      corrErr&&e("span",{style:{fontSize:10,color:"#f87171"}},"Correlation data unavailable — column shows —.")
+      corrErr&&e("span",{style:{fontSize:10,color:"#f87171"}},"Correlation data unavailable — column shows —."),
+      redund&&redund.error&&e("span",{style:{fontSize:10,color:"#64748b"}},"Similarity flags unavailable.")
     ),
+    hoverReq&&e("div",{style:{position:"fixed",right:290,bottom:16,zIndex:900,minWidth:320,boxShadow:"0 10px 30px rgba(0,0,0,.5)",background:"#0b0f1e",borderRadius:6}},
+      e("div",{style:{fontSize:9,color:"#64748b",padding:"4px 8px 0",letterSpacing:.4}},"PREVIEW · PORTFOLIO "+hoverReq.pn),
+      e(VolPreviewCard,{p:hoverData,ctx:hoverReq.ctx,loading:!hoverData})),
     e("div",{className:"tbl-wrap"},
       e("table",{className:"dtbl"},
         e("thead",null,e("tr",null,
@@ -1033,7 +1072,8 @@ function Discovery({profile,ports,onAdd}){
           }
           return e("tr",{key:a.id,onClick:()=>setOpenTicker(a.id),style:{cursor:"pointer"}},
             e("td",null,e("div",{className:"fit-badge "+fitCls},a.fit)),
-            e("td",{style:{fontWeight:"bold",color:TC[a.t]||"#818cf8"}},a.id),
+            e("td",{style:{fontWeight:"bold",color:TC[a.t]||"#818cf8"}},a.id,
+              redund&&redund.map[a.id]&&(()=>{const f=redund.map[a.id];return e("div",{title:"These candidates' daily returns move nearly identically (r = "+f.r.toFixed(2)+" over "+redund.window+"d). Adding several is closer to one position at combined weight than to separate diversifiers.",style:{fontSize:9,fontWeight:"normal",color:"#94a3b8",cursor:"help",fontFamily:"'DM Sans',sans-serif"}},"Similar to "+f.peer+" ("+f.r.toFixed(2)+")");})()),
             e("td",{style:{maxWidth:130,overflow:"hidden",textOverflow:"ellipsis",color:"#94a3b8"}},a.n),
             e("td",null,e("span",{className:"type-badge",style:{background:(TC[a.t]||"#818cf8")+"22",color:TC[a.t]||"#818cf8"}},a.t)),
             e("td",{className:(a.pctOff52wk==null||a.pctOff52wk<=0)?"dn":"up"},a.pctOff52wk==null?e("span",{title:"data unavailable"},"—"):a.pctOff52wk.toFixed(1)+"%"),
@@ -1071,7 +1111,7 @@ function Discovery({profile,ports,onAdd}){
               );
             })(),
             e("td",null,e("div",{style:{display:"flex",gap:3}},
-              pks.map(pn=>{const inP=ports[pn][a.id]!==undefined;return e("button",{key:pn,className:"btn btn-xs "+(inP?"btn-s":"btn-p"),onClick:ev=>{ev.stopPropagation();onAdd(pn,a.id);}},(inP?"✓":"+")+(" "+pn));})
+              pks.map(pn=>{const inP=ports[pn][a.id]!==undefined;return e("button",{key:pn,className:"btn btn-xs "+(inP?"btn-s":"btn-p"),onMouseEnter:()=>setHoverAdd({pn,id:a.id}),onMouseLeave:()=>setHoverAdd(null),onClick:ev=>{ev.stopPropagation();setHoverAdd(null);onAdd(pn,a.id);}},(inP?"✓":"+")+(" "+pn));})
             ))
           );
         })),
@@ -1991,6 +2031,186 @@ function ScenarioSandbox({tickers,weights}){
   );
 }
 
+// ── Portfolio risk context layer (PORTFOLIO_RISK_SPEC + Amendment A §8) ───────
+// Facts beside the ranking; the ranking itself is untouched. Every label names
+// its reference point (Amendment 3). No green/red on deltas; amber only for the
+// factual extremes §8.2 / §8.5 list.
+
+// Equal-weight re-split applied by BOTH the real add/remove (App.addToPort /
+// App.rmFromPort) and the ΔVol preview, so a preview states exactly the
+// weights an actual add or remove produces.
+function addWeights(w,id){
+  if(w[id]!==undefined)return w;
+  const n=Object.keys(w).length+1;const each=Math.floor(100/n);const nw={};
+  Object.keys(w).forEach(k=>nw[k]=each);nw[id]=each;nw[Object.keys(nw)[0]]+=100-each*n;
+  return nw;
+}
+function removeWeights(w,id){
+  const nw={...w};delete nw[id];const ks=Object.keys(nw);
+  if(ks.length>0){const each=Math.floor(100/ks.length);ks.forEach(k=>nw[k]=each);nw[ks[0]]+=100-each*ks.length;}
+  return nw;
+}
+// Sector lookup shared by the §B stock-bond sleeve bucketing and the §8.5
+// category weights: one bucketing code path (ASSETS[].sec; sectors.json-sourced
+// for screened names).
+function sectorOf(tk){const a=ASSETS.find(x=>x.id===tk);return a&&a.sec!=null?a.sec:null;}
+
+const pct1=x=>(x*100).toFixed(1)+"%";
+const pct0=x=>Math.round(x*100)+"%";
+const signed1=x=>(x<0?"−":"")+Math.abs(x*100).toFixed(1)+"%";
+const AMBER="#f59e0b";
+
+// §2 preview card text (pure). kind: add|remove|reweight.
+function volPreviewLines(p,ctx){
+  if(!p)return null;
+  const cv=p.current&&p.current.vol,pv=p.proposed&&p.proposed.vol;
+  const cb=p.current&&p.current.beta,pb=p.proposed&&p.proposed.beta;
+  const fv=v=>v==null?"—":pct1(v);
+  let at="";
+  if(ctx.kind==="add")at="(adding "+ctx.id+" at "+ctx.w+"% weight · equal re-split of "+ctx.n+" holdings)";
+  else if(ctx.kind==="remove")at="(removing "+ctx.id+(ctx.n>0?" · remaining "+ctx.n+" re-split equally":"")+")";
+  else at="("+ctx.id+" "+ctx.from+"% → "+ctx.to+"% weight)";
+  const l1="Portfolio vol "+fv(cv)+" → "+fv(pv)+"   "+at;
+  const l2=(cb==null&&pb==null)?null:"β "+(cb==null?"—":cb.toFixed(2))+" → "+(pb==null?"—":pb.toFixed(2));
+  return [l1,l2];
+}
+const VOL_PREVIEW_TIP="Annualized volatility of daily returns, trailing 252d, at current weights vs. weights after this change.";
+function VolPreviewCard({p,ctx,extra,loading}){
+  const lines=volPreviewLines(p,ctx);
+  return e("div",{title:VOL_PREVIEW_TIP,style:{fontSize:11,color:"#cbd5e1",marginTop:6,padding:"6px 8px",background:"rgba(99,102,241,.07)",border:"1px solid rgba(99,102,241,.25)",borderRadius:6,fontFamily:"'JetBrains Mono',monospace",lineHeight:1.6}},
+    loading&&!lines?e("span",{style:{color:"#64748b"}},"◌ previewing…"):null,
+    lines&&e("div",null,lines[0]),
+    lines&&lines[1]&&e("div",null,lines[1]+(extra?" · "+extra:"")),
+    p&&p.status==="not_loaded"&&e("div",{style:{color:"#64748b"}},"— · price history not loaded for this preview")
+  );
+}
+
+// §8 Portfolio Health — pure render from the /api/portfolio/health payload `d`
+// plus the builder weights (composition facts need no history). `betaChip` is
+// the shipped β chip element, relocated into the Sensitivity block (§8.3).
+function healthPanelBody(d,weights,opts){
+  const o=opts||{};const open=o.open||{};const toggle=o.toggle||(()=>{});
+  const tks=Object.keys(weights||{}).filter(t=>(weights[t]||0)>0);
+  if(!tks.length)return e("div",{style:{fontSize:12,color:"#64748b",padding:"8px 0"}},"Add holdings to see portfolio analytics");
+  const tot=tks.reduce((s,t)=>s+weights[t],0);
+  const wn={};tks.forEach(t=>wn[t]=weights[t]/tot);
+  const muted={fontSize:10,color:"#64748b"};
+  const line=(txt,tip,style)=>e("div",{title:tip||undefined,style:{fontSize:12,color:"#cbd5e1",margin:"3px 0",cursor:tip?"help":"default",...(style||{})}},txt);
+  const block=(key,title,sub,children)=>e("div",{key,style:{borderTop:"1px solid #1a2540",paddingTop:8,marginTop:8}},
+    e("div",{onClick:()=>toggle(key),style:{display:"flex",justifyContent:"space-between",cursor:"pointer"}},
+      e("div",{style:{fontSize:10,fontWeight:700,color:"#a5b4fc",letterSpacing:.6}},title,e("span",{style:{fontWeight:400,color:"#64748b",letterSpacing:0}}," — "+sub)),
+      e("span",{style:{color:"#64748b",fontSize:11}},open[key]===false?"▸":"▾")),
+    open[key]===false?null:e("div",{style:{marginTop:4}},children));
+  const ok=d&&d.status==="ok";
+  const excl=(d&&d.excluded)||[];
+  const exclNames=excl.map(x=>x.ticker);
+  const dash="—";
+
+  // §8.1 Risk
+  const dd=ok&&d.drawdown,vr=ok&&d.var;
+  const risk=[
+    line(ok?"Vol "+pct1(d.vol)+" · annualized, 252d":"Vol "+dash,
+      ok?"σ_P = √(wᵀΣw) on current weights. Σ = Ledoit-Wolf constant-correlation shrinkage (α "+d.shrinkage_alpha.toFixed(2)+") of "+d.n_obs+" daily returns, "+d.first+" → "+d.last+", annualized ×252.":null),
+    line(dd?"Max drawdown "+signed1(dd.max_dd)+" · worst peak-to-trough, past 252d":"Max drawdown "+dash,
+      dd?(dd.trough?"Peak "+dd.peak+" → trough "+dd.trough+". Value-weighted portfolio path at current weights.":"No decline from a prior peak in the window."):null),
+    line(vr?"Worst 5% of days: lost ≥"+pct1(vr.var)+" (those days averaged "+signed1(-vr.cvar)+")":"Worst 5% of days: "+dash,
+      vr?"Historical 95% VaR and CVaR of daily returns, past 252 trading days ("+vr.k+" worst of "+vr.n+" days). Describes what happened, not what will.":null),
+  ];
+
+  // §8.2 Structure (§3 decomposition + §4 effective bets live here)
+  const rows=ok?d.risk_rows:[];
+  const maxShare=rows.reduce((m,r)=>Math.max(m,r.risk_share==null?0:r.risk_share),0);
+  const nb=ok&&d.effective_bets!=null?d.effective_bets:null;
+  const pw=ok&&d.pairwise;
+  const structure=[
+    line(tks.length+" holding"+(tks.length===1?"":"s")+" · "+(nb==null?dash:nb.toFixed(1))+" effective bets",
+      "Inverse Herfindahl of risk shares: N_eff = 1 / Σ sᵢ², sᵢ = |RCᵢ| / Σ|RCⱼ|. The |RC| convention keeps a negative contribution (a holding that offsets risk) from producing shares outside 0–1; with no offsets it equals 1/Σ(RCᵢ/σ_P)². Counts how many independent risk sources the portfolio behaves like. 8 holdings concentrated in one sector can be ~2 effective bets."),
+    ...rows.map(r=>{
+      const ext=r.risk_share!=null&&r.risk_share>0.5;
+      const txt=r.rc<0?signed1(r.risk_share)+" of risk (offsets) · "+pct0(r.weight)+" of weight"
+                      :pct0(r.risk_share)+" of risk · "+pct0(r.weight)+" of weight";
+      return e("div",{key:r.ticker,style:{display:"flex",alignItems:"center",gap:6,fontSize:11,margin:"2px 0"}},
+        e("span",{style:{width:52,fontWeight:700,color:"#cbd5e1",fontFamily:"'JetBrains Mono',monospace"}},r.ticker),
+        e("div",{style:{flex:1,height:6,background:"#0a0f1c",borderRadius:3,overflow:"hidden"}},
+          e("div",{style:{width:Math.min(100,Math.abs(r.risk_share||0)*100)+"%",height:"100%",background:ext?AMBER:"#6366f1",opacity:r.rc<0?.45:.85}})),
+        e("span",{title:"Risk contribution RC = weight × marginal contribution (Σw)ᵢ/σ_P; shares sum to 100% of σ_P.",style:{color:ext?AMBER:"#94a3b8",fontFamily:"'JetBrains Mono',monospace",whiteSpace:"nowrap"}},(ext?"▲ ":"")+txt));
+    }),
+    ...exclNames.map(t=>e("div",{key:"x"+t,style:{fontSize:11,color:"#64748b",margin:"2px 0"}},t+"  — · Insufficient history")),
+    exclNames.length>0&&ok&&e("div",{key:"rebase",style:{...muted,margin:"2px 0"}},"Risk rows re-base weights to the "+rows.length+" holding"+(rows.length===1?"":"s")+" with history."),
+    line(pw&&pw.avg!=null?"Avg pairwise correlation "+pw.avg.toFixed(2)+" · across "+pw.pairs+" pair"+(pw.pairs===1?"":"s"):"Avg pairwise correlation "+dash,
+      pw&&pw.highest?"Highest: "+pw.highest.a+"–"+pw.highest.b+" "+pw.highest.r.toFixed(2)+". Pearson correlation of daily returns, same 252d window.":"Needs at least 2 holdings with history."),
+    e("div",{style:{...muted,fontStyle:"italic",marginTop:4,lineHeight:1.45}},"Share of portfolio volatility attributable to each holding (weight × marginal contribution). Describes the current portfolio's risk composition — not a recommendation to change it."),
+  ];
+
+  // §8.3 Sensitivity
+  const cp=ok&&d.capture;
+  const capTxt=cp?"Captured "+(cp.up==null?dash:pct0(cp.up))+" of market up-days · "+(cp.down==null?dash:pct0(cp.down))+" of down-days":"Captured "+dash+" of market up-days · "+dash+" of down-days";
+  const sensitivity=[
+    o.betaChip||null,
+    line(capTxt,cp?"Mean portfolio return on "+d.benchmark+"-up days ÷ mean "+d.benchmark+" return on those days ("+cp.up_days+" up days); same for down days ("+cp.down_days+" down days). A side with fewer than "+cp.min_obs+" days shows —.":null),
+  ];
+
+  // §8.4 Efficiency — reuses the shipped Sharpe label function (no fork).
+  const sh=ok&&d.sharpe,spy=ok&&d.benchmark_sharpe;
+  const shLabel=sh?sharpeMarketLabel(sh.sharpe,spy?spy.sharpe:null,false):null;
+  const efficiency=[
+    line(sh?"Sharpe "+sh.sharpe.toFixed(2)+" · "+(shLabel||dash):"Sharpe "+dash,
+      sh?"(return over the window − risk-free "+(d.rf*100).toFixed(1)+"%) ÷ annualized volatility of the portfolio's daily returns ("+pct1(sh.vol)+", realized; the Vol line above uses the shrinkage estimate). "+(spy?d.benchmark+" same window, same formula: "+spy.sharpe.toFixed(2)+".":d.benchmark+" reference unavailable — market comparison not shown."):null),
+  ];
+
+  // §8.5 Composition (weights only; all holdings)
+  const cat={};tks.forEach(t=>{const s=sectorOf(t)||"Unknown";cat[s]=(cat[s]||0)+wn[t];});
+  const cats=Object.entries(cat).sort((a,b)=>b[1]-a[1]);
+  const showAll=!!o.allCats;
+  const byW=tks.slice().sort((a,b)=>wn[b]-wn[a]);
+  const top=byW[0],top3=byW.slice(0,3).reduce((s,t)=>s+wn[t],0);
+  const y=d&&d.yield;
+  const composition=[
+    e("div",{key:"cats",style:{fontSize:12,color:"#cbd5e1",margin:"3px 0"}},
+      (showAll?cats:cats.slice(0,3)).map(([s,v])=>s+" "+pct0(v)).join(" · ")+(cats.length>3&&!showAll?" · …":""),
+      cats.length>3&&e("span",{onClick:o.toggleCats,style:{marginLeft:6,fontSize:10,color:"#818cf8",cursor:"pointer"}},showAll?"fewer":"all "+cats.length)),
+    line(y&&y.yield!=null?"Yield "+pct1(y.yield)+" · trailing 12m, weighted"+(y.unknown&&y.unknown.length?" (excludes "+y.unknown.join(", ")+")":""):"Yield "+dash,
+      "Σ weight × (trailing-12-month cash dividends ÷ latest unadjusted close), over holdings with dividend data."),
+    line("Top holding "+pct0(wn[top])+" ("+top+")"+(byW.length>=3?" · Top 3: "+pct0(top3):""),
+      "Share of portfolio weight.",wn[top]>0.4?{color:AMBER}:null),
+  ];
+
+  const header=[];
+  if(d&&d.status==="insufficient_data")header.push(e("div",{key:"ins",style:{fontSize:11,color:"#94a3b8",marginBottom:4}},"History-based metrics unavailable: no holding has ≥60 overlapping trading days."));
+  if(exclNames.length)header.push(e("div",{key:"exc",style:{fontSize:11,color:"#94a3b8",marginBottom:4}},"excludes "+exclNames.join(", ")+": insufficient history"));
+  if(ok)header.push(e("div",{key:"win",style:muted},"252 trading days · "+d.first+" → "+d.last+" · daily log returns"));
+  return e("div",null,...header,
+    block("risk","RISK","how much can this hurt",risk),
+    block("structure","STRUCTURE","is it actually diversified",structure),
+    block("sensitivity","SENSITIVITY","how does it behave vs the market",sensitivity),
+    block("efficiency","EFFICIENCY","what did it earn for the risk",efficiency),
+    block("composition","COMPOSITION","what is it, structurally",composition));
+}
+
+function PortfolioHealth({weights,betaChip}){
+  const[d,setD]=useState(null);
+  const[loading,setLoading]=useState(false);
+  const[err,setErr]=useState(null);
+  const[open,setOpen]=useState({});
+  const[allCats,setAllCats]=useState(false);
+  const wkey=JSON.stringify(weights);
+  useEffect(()=>{
+    const hs=Object.entries(weights).filter(([,w])=>w>0).map(([ticker,weight])=>({ticker,weight}));
+    if(!hs.length){setD(null);return;}
+    let cancelled=false;setLoading(true);setErr(null);
+    apiFetch("/api/portfolio/health",{holdings:hs})
+      .then(r=>{if(!cancelled)setD(r);})
+      .catch(ex=>{if(!cancelled){setD(null);setErr(ex.message||"failed");}})
+      .finally(()=>{if(!cancelled)setLoading(false);});
+    return()=>{cancelled=true;};
+  },[wkey]);
+  return e("div",{className:"card"},
+    e("div",{className:"card-title"},"PORTFOLIO HEALTH",loading&&e("span",{className:"spin",style:{marginLeft:6}},"◌")),
+    err&&e("div",{style:{fontSize:11,color:"#94a3b8",marginBottom:4}},"History-based metrics unavailable ("+err+") — shown as —."),
+    healthPanelBody(d,weights,{open,toggle:k=>setOpen(o=>({...o,[k]:o[k]===false})),betaChip,allCats,toggleCats:()=>setAllCats(a=>!a)})
+  );
+}
+
 // ── Portfolio Builder ─────────────────────────────────────────────────────────
 // Rolling stock-bond correlation visual (CORRELATION_COLUMN_SPEC.md §B).
 function RollingCorrChart({weights}){
@@ -2001,8 +2221,7 @@ function RollingCorrChart({weights}){
   const plan=useMemo(()=>{
     const eq=[],bd=[],ex=[];
     Object.entries(weights).forEach(([tk,w])=>{
-      const a=ASSETS.find(x=>x.id===tk)||{};
-      const s=sleeveOf(a.sec);
+      const s=sleeveOf(sectorOf(tk));
       if(s==="bond")bd.push({ticker:tk,weight:w});
       else if(s==="excluded")ex.push(tk);
       else eq.push({ticker:tk,weight:w});
@@ -2091,7 +2310,8 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
   const[bandLo,setBandLo]=useState("");        // user-declared band — NEVER defaulted
   const[bandHi,setBandHi]=useState("");
   const[previewTk,setPreviewTk]=useState(null);// holding hovered for removal
-  const[preview,setPreview]=useState(null);    // beta with previewTk removed
+  const[dragBase,setDragBase]=useState(null);  // {tk,w}: weights when a slider was grabbed (reweight preview)
+  const[prevData,setPrevData]=useState(null);  // /api/portfolio/preview payload
   const wkey=JSON.stringify(weights);
   useEffect(()=>{
     const hs=Object.entries(weights).map(([ticker,weight])=>({ticker,weight}));
@@ -2103,16 +2323,30 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
       .finally(()=>{if(!cancelled)setBetaLoading(false);});
     return()=>{cancelled=true;};
   },[wkey]);
+  // §2 ΔVol preview (line one) + β preview (line two) in one card. Remove uses
+  // the weights rmFromPort actually applies (equal re-split via removeWeights);
+  // reweight compares the weights at slider grab with the weights now.
+  const prevReq=useMemo(()=>{
+    if(previewTk&&weights[previewTk]!==undefined){
+      const pw=removeWeights(weights,previewTk);
+      return{cur:weights,prop:pw,ctx:{kind:"remove",id:previewTk,n:Object.keys(pw).length}};
+    }
+    if(dragBase&&Object.keys(dragBase.w).join()===Object.keys(weights).join()&&JSON.stringify(dragBase.w)!==wkey)
+      return{cur:dragBase.w,prop:weights,ctx:{kind:"reweight",id:dragBase.tk,from:dragBase.w[dragBase.tk],to:weights[dragBase.tk]}};
+    return null;
+  },[previewTk,dragBase,wkey]);
+  const prevKey=prevReq?JSON.stringify([prevReq.cur,prevReq.prop]):"";
   useEffect(()=>{
-    if(!previewTk){setPreview(null);return;}
-    const hs=Object.entries(weights).filter(([t])=>t!==previewTk).map(([ticker,weight])=>({ticker,weight}));
-    if(hs.length<1){setPreview(null);return;}
+    setPrevData(null);
+    if(!prevReq)return;
+    const toH=w=>Object.entries(w).filter(([,x])=>x>0).map(([ticker,weight])=>({ticker,weight}));
     let cancelled=false;
-    apiFetch("/api/portfolio/beta",{holdings:hs})
-      .then(d=>{if(!cancelled)setPreview(d);})
-      .catch(()=>{if(!cancelled)setPreview(null);});
-    return()=>{cancelled=true;};
-  },[previewTk,wkey]);
+    const t=setTimeout(()=>{
+      apiFetch("/api/portfolio/preview",{holdings:toH(prevReq.cur),proposed:toH(prevReq.prop)})
+        .then(d=>{if(!cancelled)setPrevData(d);}).catch(()=>{if(!cancelled)setPrevData(null);});
+    },200);
+    return()=>{cancelled=true;clearTimeout(t);};
+  },[prevKey]);
   const OPT_GOALS=[
     {id:"sharpe",title:"Best return per unit of risk",sub:"Finds the portfolio with the highest Sharpe ratio. Good if you want to maximize growth while controlling volatility.",result:"Found the weights that maximize (return − risk-free) ÷ volatility — the highest Sharpe ratio your constraints allow."},
     {id:"minvol",title:"Lowest possible risk",sub:"Finds the portfolio with minimum volatility. Good if preserving capital matters more than growth.",result:"Minimized portfolio volatility — the most stable combination of your holdings."},
@@ -2145,36 +2379,25 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
   const fmtPct=(x,signed)=>{const v=x*100;return (signed&&v>0?"+":"")+v.toFixed(2)+"%";};
   const stats=tickers.length>0?calcStats(weights):null;
   const total=Object.values(weights).reduce((a,b)=>a+b,0);
-  if(!tickers.length)return e("div",{className:"card",style:{textAlign:"center",padding:36}},e("div",{style:{fontSize:22,marginBottom:9}},"📊"),e("div",{style:{color:"#475569"}},"No assets yet — go to Discovery and click + to add them here."));
-  return e("div",{className:"builder-layout"},
-    e("div",{className:"builder-left"},
-      e("div",{className:"card"},
-        e("div",{className:"card-title"},"HOLDINGS"),
-        tickers.map((k,i)=>e("div",{key:k,className:"w-row"},
-          e("span",{className:"w-tick",style:{color:COLORS[i%COLORS.length]}},k),
-          e("input",{type:"range",min:0,max:60,value:weights[k],onChange:ev=>onUpdate(k,+ev.target.value),style:{flex:1,accentColor:COLORS[i%COLORS.length]}}),
-          e("span",{className:"w-pct"},weights[k]+"%"),
-          e("button",{className:"btn btn-d btn-xs",onClick:()=>onRemove(k),onMouseEnter:()=>setPreviewTk(k),onMouseLeave:()=>setPreviewTk(null),title:"Remove (hover to preview β)"},"✕")
-        )),
-        e("div",{style:{fontSize:11,color:"#475569",marginTop:7,paddingTop:7,borderTop:"1px solid #1a2540"}},"Total: ",e("span",{style:{fontWeight:"bold",color:Math.abs(total-100)<2?"#1D9E75":"#ef4444"}},total+"%")),
-        (()=>{
-          const lo=bandLo!==""&&!isNaN(+bandLo)?+bandLo:null, hi=bandHi!==""&&!isNaN(+bandHi)?+bandHi:null;
-          const bandSet=lo!=null&&hi!=null&&hi>=lo;
+  if(!tickers.length)return e(React.Fragment,null,e("div",{className:"card",style:{textAlign:"center",padding:36}},e("div",{style:{fontSize:22,marginBottom:9}},"📊"),e("div",{style:{color:"#475569"}},"No assets yet — go to Discovery and click + to add them here.")),e(PortfolioHealth,{weights}));
+  const bandLoN=bandLo!==""&&!isNaN(+bandLo)?+bandLo:null, bandHiN=bandHi!==""&&!isNaN(+bandHi)?+bandHi:null;
+  const bandOn=bandLoN!=null&&bandHiN!=null&&bandHiN>=bandLoN;
+  const prevTrans=bandOn&&prevData&&prevData.current&&prevData.proposed?betaTransition(prevData.current.beta,prevData.proposed.beta,bandLoN,bandHiN):"";
+  // β chip (BETA_TRACKER_SPEC), relocated into the Portfolio Health Sensitivity block (§8.3).
+  const betaChip=(()=>{
+          const lo=bandLoN, hi=bandHiN;
+          const bandSet=bandOn;
           const b=beta&&beta.status==="ok"?beta.beta:null;
           const bench=(beta&&beta.benchmark)||"SPY", benchName=bench==="SPY"?"S&P 500":bench;
           const tip=b!=null?("Regression of the value-weighted portfolio's daily returns on "+bench+" over "+beta.window+" trading days · R² "+(beta.r2!=null?beta.r2.toFixed(2):"—")+" · "+beta.n_obs+" observations"):(beta?("Insufficient overlapping history ("+(beta.n_obs||0)+" days; need ≥60)"):"");
           const mkt=betaMarketLabel(b), bandLbl=bandSet?betaBandLabel(b,lo,hi):null;
-          const pv=preview&&preview.status==="ok"?preview.beta:null;
-          const trans=bandSet?betaTransition(b,pv,lo,hi):"";
-          return e("div",{style:{marginTop:9,paddingTop:9,borderTop:"1px solid #1a2540"}},
+          return e("div",{key:"beta",style:{marginBottom:6}},
             e("div",{style:{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}},
               e("span",{title:tip,style:{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:"bold",color:"#cbd5e1",cursor:b!=null?"help":"default"}},
                 "Portfolio β "+(betaLoading&&!beta?"…":b!=null?b.toFixed(2):"—")+" · vs "+benchName),
               mkt&&e("span",{style:{fontSize:10,color:"#94a3b8"}},"· "+mkt),
               bandLbl&&e("span",{style:{fontSize:10,fontWeight:"bold",color:bandLbl.indexOf("In band")===0?"#1D9E75":"#f59e0b"}},"· "+bandLbl)
             ),
-            previewTk&&pv!=null&&b!=null&&e("div",{style:{fontSize:11,color:"#a5b4fc",marginTop:4,fontFamily:"'JetBrains Mono',monospace"}},
-              "β "+b.toFixed(2)+" → "+pv.toFixed(2)+" (removing "+previewTk+")"+(trans?" · "+trans:"")),
             e("div",{style:{display:"flex",alignItems:"center",gap:5,marginTop:6,fontSize:10,color:"#64748b"}},
               e("span",null,"Target band (optional):"),
               e("input",{type:"number",step:"0.05",placeholder:"lo",value:bandLo,onChange:ev=>setBandLo(ev.target.value),style:{width:46,padding:"2px 4px",background:"#080d1a",border:"1px solid #1a2540",borderRadius:4,color:"#cbd5e1",fontSize:10}}),
@@ -2184,7 +2407,19 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
             ),
             e("div",{style:{fontSize:9,color:"#475569",marginTop:3,fontStyle:"italic"}},"Regressed, not a weighted average of betas. R² and observation count in the β tooltip. You set the band; Quantex never suggests one.")
           );
-        })()
+        })();
+  return e("div",{className:"builder-layout"},
+    e("div",{className:"builder-left"},
+      e("div",{className:"card"},
+        e("div",{className:"card-title"},"HOLDINGS"),
+        tickers.map((k,i)=>e("div",{key:k,className:"w-row"},
+          e("span",{className:"w-tick",style:{color:COLORS[i%COLORS.length]}},k),
+          e("input",{type:"range",min:0,max:60,value:weights[k],onPointerDown:()=>setDragBase({tk:k,w:{...weights}}),onChange:ev=>onUpdate(k,+ev.target.value),style:{flex:1,accentColor:COLORS[i%COLORS.length]}}),
+          e("span",{className:"w-pct"},weights[k]+"%"),
+          e("button",{className:"btn btn-d btn-xs",onClick:()=>onRemove(k),onMouseEnter:()=>setPreviewTk(k),onMouseLeave:()=>setPreviewTk(null),title:"Remove (hover to preview vol and β)"},"✕")
+        )),
+        e("div",{style:{fontSize:11,color:"#475569",marginTop:7,paddingTop:7,borderTop:"1px solid #1a2540"}},"Total: ",e("span",{style:{fontWeight:"bold",color:Math.abs(total-100)<2?"#1D9E75":"#ef4444"}},total+"%")),
+        prevReq&&e(VolPreviewCard,{p:prevData,ctx:prevReq.ctx,loading:!prevData,extra:prevTrans})
       ),
       e(RollingCorrChart,{weights}),
       e("div",{className:"card"},
@@ -2315,6 +2550,7 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
       e(ScenarioSandbox,{tickers,weights})
     ),
     e("div",{className:"builder-right"},
+      e(PortfolioHealth,{weights,betaChip}),
       stats&&e(React.Fragment,null,
         e("div",{className:"stat-grid"},
           [["RETURN",(stats.ret>0?"+":"")+stats.ret+"%",stats.ret>=0?"up":"dn"],["VOL σ",stats.vol+"%",""],["SHARPE",stats.sh,stats.sh>=1?"up":stats.sh>=.5?"wa":"dn"],["BETA",stats.beta,""],["SORTINO",stats.so,""],["TREYNOR",stats.tr+"%",""],["VAR 95%",stats.var95+"%","dn"],["MAX DD",stats.maxDD+"%","dn"]].map(([l,v,cls])=>
@@ -4146,8 +4382,9 @@ function App({user,logout}){
   const resetAll=()=>{if(!confirm("Reset all Quantex data? This clears your profile and all portfolios."))return;try{localStorage.removeItem("qx_profile");localStorage.removeItem("qx_ports");}catch(e){}ASSETS=FALLBACK_ASSETS;setProfile(null);setPorts({A:{},B:{},C:{}});setTab("onboard");};
 
   const onDone=p=>{setProfile(p);setTab("disco");};
-  const addToPort=(pn,id)=>{setPorts(prev=>{const w={...prev[pn]};if(w[id]!==undefined)return prev;const n=Object.keys(w).length+1;const each=Math.floor(100/n);const nw={};Object.keys(w).forEach(k=>nw[k]=each);nw[id]=each;nw[Object.keys(nw)[0]]+=100-each*n;return{...prev,[pn]:nw};});};
-  const rmFromPort=(pn,id)=>{setPorts(prev=>{const nw={...prev[pn]};delete nw[id];const ks=Object.keys(nw);if(ks.length>0){const each=Math.floor(100/ks.length);ks.forEach(k=>nw[k]=each);nw[ks[0]]+=100-each*ks.length;}return{...prev,[pn]:nw};});};
+  // Weight rules shared with the ΔVol preview (addWeights/removeWeights).
+  const addToPort=(pn,id)=>{setPorts(prev=>{const w=prev[pn];if(w[id]!==undefined)return prev;return{...prev,[pn]:addWeights(w,id)};});};
+  const rmFromPort=(pn,id)=>{setPorts(prev=>({...prev,[pn]:removeWeights(prev[pn],id)}));};
   const togglePort=(pn,id)=>{
     if(ports[pn]&&ports[pn][id]!==undefined)rmFromPort(pn,id);
     else addToPort(pn,id);
