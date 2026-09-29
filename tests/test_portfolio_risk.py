@@ -107,8 +107,8 @@ def test_effective_bets_abs_convention_matches_spec_without_negatives():
 # ── §8.1 drawdown / VaR / CVaR ────────────────────────────────────────────────
 def test_max_drawdown_brute_force_and_dates():
     idx = pd.bdate_range("2024-01-01", periods=6)
-    r = pd.Series(np.log([1.10, 0.90, 0.95, 1.20, 0.70, 1.05]), index=idx)
-    path = np.exp(np.concatenate([[0], np.cumsum(r.values)]))
+    r = pd.Series([0.10, -0.10, -0.05, 0.20, -0.30, 0.05], index=idx)   # simple returns
+    path = np.concatenate([[1.0], np.cumprod(1 + r.values)])
     brute = min(path[j] / path[i] - 1 for i in range(len(path)) for j in range(i, len(path)))
     dd = max_drawdown(r)
     assert dd["max_dd"] == pytest.approx(brute)
@@ -146,15 +146,38 @@ def test_capture_guard_renders_none_below_min_obs():
 
 
 # ── §8.4 Sharpe (shipped per-ticker method, config rf) ────────────────────────
-def test_sharpe_matches_add_ticker_formula():
+def test_sharpe_realized_simple_returns():
     idx = pd.bdate_range("2024-01-01", periods=252)
-    r = pd.Series(np.random.default_rng(10).normal(0.0006, 0.012, 252), index=idx)
-    closes = 100 * np.exp(np.concatenate([[0], np.cumsum(r.values)]))
-    ret_pct = (closes[-1] / closes[0] - 1) * 100
-    vol_pct = r.std() * math.sqrt(252) * 100
-    shipped = (ret_pct - RISK_FREE_RATE * 100) / vol_pct                    # app/main.py add_ticker
-    assert sharpe_1y(r, RISK_FREE_RATE)["sharpe"] == pytest.approx(shipped, rel=1e-12)
+    r = pd.Series(np.random.default_rng(10).normal(0.0006, 0.012, 252), index=idx)   # simple
+    tot = np.prod(1 + r.values) - 1
+    vol = r.std() * math.sqrt(252)
+    out = sharpe_1y(r, RISK_FREE_RATE)
+    assert out["total_return"] == pytest.approx(tot, rel=1e-12)
+    assert out["sharpe"] == pytest.approx((tot - RISK_FREE_RATE) / vol, rel=1e-12)
 
+
+def test_regression_portfolio_return_is_weighted_simple_not_weighted_log():
+    """LAUNCH_HONESTY_DECISIONS.md L1: the panel showed Sharpe 5.74 / +321.7% for
+    MU/WDC/DELL/HPE 25% each; the true rebalanced portfolio was 6.59 / +372.3%.
+    A weighted sum of log returns understates a high-volatility portfolio's
+    return. Check the engine against plain price arithmetic."""
+    rng = np.random.default_rng(42)
+    n = 253
+    idx = pd.bdate_range("2025-01-01", periods=n)
+    px = pd.DataFrame({t: 100 * np.cumprod(1 + rng.normal(mu, 0.04, n))
+                       for t, mu in [("A", 0.008), ("B", 0.006), ("C", 0.004), ("D", 0.002), ("SPY", 0.0005)]},
+                      index=idx)
+    logret = np.log(px / px.shift(1)).dropna()          # what the store holds
+    w = {"A": 25, "B": 25, "C": 25, "D": 25}
+    simple = px.pct_change().dropna()
+    rp = simple[list(w)].values @ np.full(4, 0.25)      # rebalanced to current weights
+    tot = np.prod(1 + rp) - 1
+    vol = rp.std(ddof=1) * math.sqrt(252)
+    h = portfolio_health(logret, w, rf=RISK_FREE_RATE)
+    assert h["sharpe"]["total_return"] == pytest.approx(tot, rel=1e-10)
+    assert h["sharpe"]["sharpe"] == pytest.approx((tot - RISK_FREE_RATE) / vol, rel=1e-10)
+    wrong = np.exp((logret[list(w)].values @ np.full(4, 0.25)).sum()) - 1
+    assert tot - wrong > 0.05                           # the old basis was materially low
 
 # ── §8.2 pairwise correlation ─────────────────────────────────────────────────
 def test_pairwise_avg_equals_mean_of_shrunk_correlations():

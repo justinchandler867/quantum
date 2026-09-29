@@ -124,7 +124,7 @@ def test_full_portfolio_strings(rendered):
     assert any("of risk (offsets)" in s for s in t)              # TLT negative RC, factual
     assert any(s.startswith("Avg pairwise correlation ") and "across 10 pairs" in s for s in t)
     assert any(s.startswith("Captured ") and "of market up-days ·" in s for s in t)
-    assert any(re.fullmatch(r"Sharpe -?\d+\.\d\d · (Beat market|Trailed market|Lost vs cash)", s) for s in t)
+    assert any(re.fullmatch(r"Sharpe \(realized, past 252 trading days\) -?\d+\.\d\d · (Beat market|Trailed market|Lost vs cash)", s) for s in t)
     assert any(s.startswith("Technology ") for s in t)
     assert any(s.startswith("Yield ") and "(excludes NVDA)" in s for s in t)
     assert any(s.startswith("Top holding ") for s in t)

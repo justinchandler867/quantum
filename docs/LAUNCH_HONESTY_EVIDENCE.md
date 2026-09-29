@@ -179,3 +179,62 @@ Max Sharpe	+47.18%	53.09%	0.808
 - Sample-data banner rendered only via source test (the snapshot screen completes in ~0.4 s, so the banner is never on screen in a healthy run).
 - Frontier's 'Your Portfolio' Sharpe (0.80, historical-average expected return over the full store, blended covariance) and the Health panel's Sharpe (5.74, trailing 252-day realized) are both real but use different windows/models on different tabs; the labels differ but a reviewer may compare them.
 - Advice/verdict copy still present on real data (K23).
+
+---
+
+## Final pass (2026-09-29)
+
+### Sharpe sanity check (portfolio behind the Health panel's 5.74)
+```
+holdings: MU 25%, WDC 25%, DELL 25%, HPE 25% (equal weight, rebalanced to current weights)
+window: 2025-09-25 -> 2026-09-25, 252 daily returns (snapshot adjusted closes); rf 4.3% (config RISK_FREE_RATE)
+single-name 252d returns: MU +570.3%  WDC +317.2%  DELL +331.6%  HPE +162.0%
+
+independent (plain numpy, simple returns, rebalanced): return 372.3293%  ann. vol 55.8449%  Sharpe 6.590206
+buy-and-hold alternative:                              return 345.28%    (vol from above)   Sharpe 6.1058
+engine BEFORE fix (weighted log returns):              return 321.69%    ann. vol 55.25%    Sharpe 5.7442   <- mismatch
+engine AFTER fix:                                      return 372.3293%  ann. vol 55.8449%  Sharpe 6.590206 <- matches
+annualization: sqrt(252) on daily std (ddof=1) in both; not the cause
+```
+Regression test: tests/test_portfolio_risk.py::test_regression_portfolio_return_is_weighted_simple_not_weighted_log
+
+### Wording pass: every change
+| # | File | Where | Before | After |
+|---|---|---|---|---|
+| 1 | static/quantex.html | Profile flag | flags.push("High liquidity need conflicts with aggressive allocation") | flags.push("Liquidity need: within 1 year · profile score "+s+"/100 (the score counts this answer at −14)") |
+| 2 | static/quantex.html | Profile flag | flags.push("Low loss tolerance — consider more conservative profile") | flags.push("If the portfolio fell 25%: \"Sell everything\" · profile score "+s+"/100 (the score counts this answer at −20)") |
+| 3 | static/quantex.html | Onboarding step 1 | "This shapes everything — which assets we recommend, how we optimize, and what risk guardrails apply." | "Your goal sets the factor weights behind screen match, the optimizer's constraints, and the profile limits (max position, max beta)." |
+| 4 | static/quantex.html | Correlations: stress flag | " — no diversification in crisis" | " — stress-window ρ above 0.85" |
+| 5 | static/quantex.html | Correlations: empty flags | "No high-correlation pairs — good diversification." | "No pair above ρ 0.75 in this regime." |
+| 6 | static/quantex.html | Correlations: flag | " — limited diversification" | " — above the 0.75 flag level" |
+| 7 | static/quantex.html | Correlations: negative pair (diagnostics) | " — hedging benefit" | " — moved opposite over the window (ρ < 0)" |
+| 8 | static/quantex.html | Correlations: negative pair (matrix) | " — provides hedging benefit" | " — moved opposite over the window (ρ < 0)" |
+| 9 | static/quantex.html | Correlations: heading | "⚠ DIVERSIFICATION WARNINGS" | "STRESS-CORRELATION FACTS" |
+| 10 | static/quantex.html | Correlations: heading | "HEDGING PAIRS (ρ < 0)" | "NEGATIVELY CORRELATED PAIRS (ρ < 0)" |
+| 11 | static/quantex.html | Optimizer goal: max Sharpe | Finds the portfolio with the highest Sharpe ratio. Good if you want to maximize growth while controlling volatility. | Finds the weights with the highest Sharpe ratio under your constraints. |
+| 12 | static/quantex.html | Optimizer goal: min vol | Finds the portfolio with minimum volatility. Good if preserving capital matters more than growth. | Finds the weights with the lowest volatility under your constraints. |
+| 13 | static/quantex.html | Optimizer goal: risk parity | Each position contributes equally to total portfolio risk. Good for diversification without concentrating bets. | Each position contributes equally to total portfolio risk. |
+| 14 | static/quantex.html | Optimizer goal: max div | Maximizes the diversification ratio — how much the portfolio's volatility is reduced versus the weighted average of its parts. Good for capturing cross-asset variance benefits. | Maximizes the diversification ratio — how much the portfolio's volatility is reduced versus the weighted average of its parts. |
+| 15 | static/quantex.html | Optimizer result: min vol | Minimized portfolio volatility — the most stable combination of your holdings. | Minimized portfolio volatility for these holdings under your constraints. |
+| 16 | static/quantex.html | Optimizer result: risk parity | Equalized risk contributions across positions — no single position dominates. | Equalized risk contributions across positions. |
+| 17 | static/quantex.html | Paper: CFA concept | "Your weight per position reflects concentration risk. >10% in one stock = concentrated." | "WT % is each position's share of the account — the number concentration is measured on." |
+| 18 | static/quantex.html | Challenge 1 hint | "Focus on high-Sharpe assets like MSFT, COST, LLY. Diversify across sectors to reduce volatility without sacrificing return." | "Portfolio Sharpe depends on the holdings' returns, their volatilities, and how they co-move; lower correlation lowers portfolio volatility for the same weights." |
+| 19 | static/quantex.html | Challenge 1 reward | "You demonstrated that diversified portfolio construction produces better risk-adjusted returns than concentration." | "Your 8-holding portfolio had a realized Sharpe above 1.0 over the past 252 trading days with no holding above 20%." |
+| 20 | static/quantex.html | Challenge 2 hint | "Mix low-beta defensive stocks (JNJ, PG, GLD) with moderate-beta names. Avoid high-beta tech." | "Portfolio beta is the regression of the portfolio's daily returns on SPY; it moves with the weights of holdings that move more or less than the market." |
+| 21 | static/quantex.html | Challenge 2 reward | "You built a defensive portfolio that should fall less than the market in downturns while still participating in upside." | "Your portfolio's beta vs SPY was between 0.70 and 0.80 over the past 252 trading days: on average it moved 70–80% as much as SPY." |
+| 22 | static/quantex.html | Challenge 3 hint | "Bond ETFs (HYG), REITs (O, VNQ), and dividend stocks (JNJ, XOM, PG) are your tools. Balance yield with quality." | "Portfolio yield is the weighted trailing-12-month yield of the holdings; Sharpe is measured on the same 252-day window." |
+| 23 | static/quantex.html | Challenge 3 reward | "You balanced income generation with risk-adjusted quality — the core skill for managing retirement portfolios." | "Your portfolio's trailing yield was at least 3.0% with a realized Sharpe of at least 0.5." |
+| 24 | static/quantex.html | Challenge 4 hint | "This requires genuine diversification. Mix asset classes: bonds, gold (GLD), low-vol stocks (JNJ, PG), and moderate equities. Correlation matters more than individual vol here." | "Portfolio volatility falls below the weighted average of holding volatilities when holdings are imperfectly correlated; the Correlations tab shows the pairs." |
+| 25 | static/quantex.html | Challenge 4 reward | "You demonstrated that diversification creates portfolios with less risk than any individual component — the free lunch of finance." | "Your portfolio had realized volatility under 15% and a return above 8% over the past 252 trading days." |
+| 26 | static/quantex.html | Challenge 5 hint | "Max drawdown is driven by the worst-performing assets in a crisis. Include negative-beta or low-correlation assets (GLD, bonds, TIPS) to cushion drawdowns." | "Max drawdown is the worst peak-to-trough fall of the portfolio path; holdings that fell at different times reduce it." |
+| 27 | static/quantex.html | Challenge 5 reward | "You built a portfolio that limits crisis losses while maintaining attractive returns — the Holy Grail of institutional portfolio management." | "Your portfolio's worst peak-to-trough fall was smaller than 25% with a return of at least 10% over the past 252 trading days." |
+| 28 | static/quantex.html | Challenge 6 hint | "High-vol assets need smaller weights. If NVDA has 3x the vol of GLD, it should get roughly 1/3 the weight to contribute equal risk. Use the risk contribution bars in the Metrics tab." | "Risk contribution = weight × marginal contribution; an asset with 3× the volatility contributes equal risk at roughly 1/3 the weight (ignoring correlation). The Metrics tab shows each holding's share of risk." |
+| 29 | static/quantex.html | Challenge 6 reward | "You applied the risk parity framework used by Bridgewater's All Weather Fund — weighting by risk contribution, not capital." | "No holding contributed more than 25% of your portfolio's volatility, across at least 6 holdings." |
+| 30 | static/quantex.html | Challenge 7 hint | "This is the definition of alpha — excess return not explained by market exposure. You need high-conviction picks that outperform on their own merits. Look for high Sharpe + low beta." | "Alpha is return not explained by market exposure: with beta below 1, a return above SPY's cannot come from market exposure alone." |
+| 31 | static/quantex.html | Challenge 7 reward | "You generated genuine alpha — outperformance beyond what market exposure explains. This is what hedge fund managers get paid for." | "Your portfolio's past-252-day return exceeded SPY's over the same window with beta below 1.0." |
+| 32 | app/main.py | Diagnostics warning (Correlations tab) | f"Correlation spikes {diag.corr_spike_pct:.0f}% in stress — " ⏎             f"diversification benefit drops significantly in drawdowns" | f"Average pairwise correlation is {diag.avg_corr_stress:.2f} on stress days vs " ⏎             f"{diag.avg_corr_normal:.2f} on normal days (+{diag.corr_spike_pct:.0f}%)." |
+| 33 | app/main.py | Diagnostics warning (Correlations tab) | f"Pairs with stress ρ > 0.85 (effectively no diversification in crisis): " | f"Pairs with stress-window ρ above 0.85: " |
+| 34 | app/main.py | Diagnostics warning (Correlations tab) | "No negative-correlation positions — consider adding bond or gold exposure " ⏎             "for crisis protection" | "No holding pair has ρ below −0.05, and no reference hedge " ⏎             f"({', '.join(REFERENCE_HEDGES)}) has a negative average correlation with the holdings." |
+| 35 | app/main.py | Diagnostics warning (Correlations tab) | f"Only {len(req.tickers)} positions — unsystematic risk is not fully diversified. " ⏎             f"Consider adding positions to at least 8." | (warning removed) → Correlations tab fact line: "N holdings; the Portfolio Health panel's effective bets shows X." |
+| 36 | app/data_ingest.py | Server log line (not user-facing) | f"Stress estimates may be unstable. Consider lowering threshold." | f"Stress-regime estimates rest on those days only." |
+| 37 | static/quantex.html | Frontier info line | "Your portfolio: Return …% · Vol …% · Sharpe … · Near optimal ✓" / "Consider optimizing in Portfolio Builder" | "Your portfolio (model expectation): return R% · vol V% · Sharpe (model expectation) S · G pp below the frontier's F% at this volatility" |

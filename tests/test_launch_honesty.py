@@ -258,3 +258,101 @@ def test_live_refresh_is_opt_in(monkeypatch):
     with TestClient(main.app):
         pass
     assert started == ["live-refresh"]
+
+
+# ── Amendment 3 copy pass (final) ─────────────────────────────────────────────
+REMOVED_COPY = [
+    "consider more conservative profile", "which assets we recommend", "no diversification in crisis",
+    "good diversification", "limited diversification", "hedging benefit", "DIVERSIFICATION WARNINGS",
+    "Near optimal", "Consider optimizing", "Good if you want", "Good if preserving", "Good for diversification",
+    "Good for capturing", "most stable combination", "no single position dominates", "= concentrated",
+    "like MSFT, COST, LLY", "Avoid high-beta tech", "are your tools", "Holy Grail", "free lunch",
+    "should fall less than the market", "hedge fund managers get paid", "genuine alpha",
+    "high-conviction picks", "conflicts with aggressive allocation",
+]
+
+
+def _app_copy():
+    """User-facing app copy: the frontend minus CFA curriculum (CourseHub MODULES),
+    the hidden Trade Desk (TRADE_DESK_SPEC), and the AI system prompt."""
+    s = SRC
+    i = s.index("  const MODULES=[")
+    s = s[:i] + s[s.index("\n  ];\n", i):]
+    i = s.index("function TradeDeck(")
+    s = s[:i] + s[s.index("// ── Compare", i):]
+    s = re.sub(r'const sysPrompt="[^"]*";', "", s)
+    return s
+
+
+def test_removed_advice_copy_absent():
+    main_src = open(main.__file__, encoding="utf-8").read()
+    for phrase in REMOVED_COPY:
+        assert phrase not in _app_copy(), phrase
+        assert phrase.lower() not in main_src.lower(), phrase
+
+
+def test_no_imperative_or_verdict_words_in_app_copy():
+    copy = _app_copy()
+    lits = re.findall(r'"([^"\\n]{3,})"', copy)
+    pat = re.compile(r"\b(consider(ing)? (adding|trimming|optimizing|a more)|should|well[- ]diversified|poorly"
+                     r"|near optimal|good diversification|healthy|unhealthy|risky)\b", re.I)
+    hits = [l for l in lits if pat.search(l)
+            and "not a recommendation" not in l and "not a forecast" not in l]
+    assert hits == [], hits
+
+
+def test_sharpe_basis_labels():
+    assert "Sharpe (realized, past 252 trading days) " in SRC
+    assert '"Sharpe (model expectation) "+cs.sh' in SRC
+    assert "The Frontier tab's Sharpe is a model expectation instead." in SRC
+    assert "Portfolio Health's Sharpe is the realized figure for the past 252 trading days instead." in SRC
+
+
+# ── Challenge progress reset (one-time) ──────────────────────────────────────
+@pytest.mark.skipif(not NODE, reason="node not available")
+def test_challenge_progress_reset_once():
+    def grab(name):
+        i = SRC.index("function " + name + "(")
+        s = SRC.index("{", SRC.index(")", i))
+        d = 0
+        for j in range(s, len(SRC)):
+            d += SRC[j] == "{"
+            d -= SRC[j] == "}"
+            if d == 0:
+                return SRC[i:j + 1]
+    consts = re.search(r'const CHALLENGES_DATA_VERSION="\d+";', SRC).group(0).replace("const ", "var ")
+    code = consts + "\n" + "\n".join(grab(n) for n in ("_lsGet", "_lsSet", "_lsDel", "migrateChallengeProgress")) + r"""
+    const mk=init=>{const m=new Map(Object.entries(init));return{getItem:k=>m.has(k)?m.get(k):null,setItem:(k,v)=>m.set(k,String(v)),removeItem:k=>m.delete(k),_m:m};};
+    const A=(c,msg)=>{if(!c){console.error("FAIL "+msg);process.exit(1);}};
+    // old progress present -> cleared once, notice pending
+    global.localStorage=mk({qx_challenges:JSON.stringify(["sharpe_1","low_vol"])});
+    A(migrateChallengeProgress()===true,"reset reported");
+    A(localStorage.getItem("qx_challenges")===null,"progress cleared");
+    A(localStorage.getItem("qx_challenges_reset_notice")==="pending","notice pending");
+    // second load: no second reset, new progress kept
+    localStorage.setItem("qx_challenges",JSON.stringify(["beta_target"]));
+    localStorage.setItem("qx_challenges_reset_notice","seen");
+    A(migrateChallengeProgress()===false,"no second reset");
+    A(localStorage.getItem("qx_challenges")==='["beta_target"]',"new progress kept");
+    // fresh user: nothing to reset, no notice
+    global.localStorage=mk({});
+    A(migrateChallengeProgress()===false,"fresh: no reset");
+    A(localStorage.getItem("qx_challenges_reset_notice")===null,"fresh: no notice");
+    console.log("OK");"""
+    r = subprocess.run([NODE, "-e", code], capture_output=True, text=True)
+    assert r.returncode == 0 and "OK" in r.stdout, r.stderr + r.stdout
+    assert 'CHALLENGE_RESET_NOTICE="Challenge progress was reset: earlier results were computed on placeholder data."' in SRC
+
+
+def test_refresh_snapshot_validator_accepts_committed_snapshot():
+    """scripts/refresh_snapshot.py is not run here (network); its validator is."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "refresh_snapshot", os.path.join(HERE, "..", "scripts", "refresh_snapshot.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rep = mod.validate(mod.TARGET)
+    assert rep["problems"] == [], rep
+    assert rep["stress_days"] >= 60 and rep["tickers"] >= 500
+    later = mod.validate(mod.TARGET, previous_asof="2999-01-01")
+    assert later["problems"] and "older than committed" in later["problems"][0]

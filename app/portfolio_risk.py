@@ -5,8 +5,12 @@ and the §8 Portfolio Health metrics (Amendment A).
 One estimation path feeds every number, so they are mutually consistent:
 
   * Return series: the app's shared daily log-return frame (_store["returns"],
-    from adjusted closes) and the shared value-weighted helper
-    `weighted_portfolio_returns` — the same series the beta tracker regresses.
+    from adjusted closes), converted ONCE to simple returns (expm1) when the
+    window is selected, then the shared value-weighted helper
+    `weighted_portfolio_returns`. A portfolio's daily return is the weighted sum
+    of SIMPLE returns (constant current weights, rebalanced daily); a weighted
+    sum of log returns is not a portfolio return and compounds into a large
+    understatement over a year (LAUNCH_HONESTY_DECISIONS.md L1).
   * Window: the trailing 252 rows of that frame (the correlation column / beta
     tracker window).
   * Covariance: `ledoit_wolf_constant_correlation` from return_models.py, the
@@ -46,8 +50,9 @@ def select_window(returns: pd.DataFrame | None, holdings: dict[str, float],
     excluded when it is absent from the loaded frame or has < `min_obs`
     non-missing days in the window. Never imputed, never zero-filled.
 
-    Returns (frame restricted to included tickers with complete rows,
-             included tickers, excluded [{ticker, reason, n_obs}]).
+    Returns (SIMPLE daily returns restricted to included tickers with complete
+             rows, included tickers, excluded [{ticker, reason, n_obs}]).
+    `returns` is the store's log-return frame.
     """
     tickers = [t for t in holdings if holdings[t] is not None and float(holdings[t]) > 0]
     excluded = []
@@ -71,7 +76,7 @@ def select_window(returns: pd.DataFrame | None, holdings: dict[str, float],
         # Each holding clears the floor alone but their common overlap does not.
         excluded += [{"ticker": t, "reason": "insufficient_overlap", "n_obs": int(len(sub))} for t in included]
         return None, [], excluded
-    return sub, included, excluded
+    return np.expm1(sub), included, excluded
 
 
 def risk_decomposition(sub: pd.DataFrame, weights: dict[str, float]) -> dict:
@@ -119,11 +124,11 @@ def effective_bets(rcs) -> float | None:
 
 
 def max_drawdown(port: pd.Series) -> dict | None:
-    """Worst peak-to-trough of the value path exp(cumsum(r)) over the window."""
+    """Worst peak-to-trough of the value path cumprod(1 + r) (simple returns)."""
     r = port.dropna()
     if len(r) < 2:
         return None
-    path = np.exp(np.concatenate([[0.0], np.cumsum(r.values)]))
+    path = np.concatenate([[1.0], np.cumprod(1.0 + r.values)])
     dates = [None] + list(r.index)
     peak_i, best, best_peak, best_trough = 0, 0.0, 0, 0
     for i in range(1, len(path)):
@@ -171,9 +176,10 @@ def capture_ratios(port: pd.Series, bench: pd.Series, min_obs: int) -> dict:
 
 def sharpe_1y(series: pd.Series, rf: float) -> dict | None:
     """
-    The shipped per-ticker Sharpe method (app/main.py add_ticker): (total return
-    over the window - rf) / annualized vol of daily log returns, rf from config.
-    Total return compounds the log series: exp(sum r) - 1.
+    Realized Sharpe over the window from SIMPLE daily returns:
+    (compounded return prod(1 + r) - 1 - rf) / (std(r) * sqrt(252)), rf from
+    config. Same structure as the per-ticker method in app/main.py add_ticker
+    (window total return minus rf over annualized daily vol).
     """
     r = series.dropna()
     if len(r) < 20:
@@ -181,7 +187,7 @@ def sharpe_1y(series: pd.Series, rf: float) -> dict | None:
     vol = float(r.std(ddof=1) * math.sqrt(TRADING_DAYS))
     if not vol > 0:
         return None
-    tot = float(math.exp(r.sum()) - 1.0)
+    tot = float(np.prod(1.0 + r.values) - 1.0)
     return {"sharpe": (tot - rf) / vol, "total_return": tot, "vol": vol, "n": int(len(r))}
 
 
@@ -237,7 +243,7 @@ def portfolio_health(returns: pd.DataFrame | None, holdings: dict[str, float], *
     })
     bench = None
     if returns is not None and benchmark in returns.columns:
-        bench = returns[benchmark].reindex(sub.index)
+        bench = np.expm1(returns[benchmark].reindex(sub.index))
     base["capture"] = capture_ratios(port, bench, capture_min_obs) if bench is not None else None
     base["sharpe"] = sharpe_1y(port, rf)
     base["benchmark_sharpe"] = sharpe_1y(bench, rf) if bench is not None else None

@@ -40,7 +40,7 @@ def _clean(v):
     return v
 
 
-def main():
+def main(out=OUT):
     t0 = time.time()
     universe = load_nasdaq_tickers()
     tickers = sorted(set(universe + REFERENCE_HEDGES + [BETA_BENCHMARK, "QQQ"]))
@@ -60,11 +60,12 @@ def main():
         "fundamentals": [{k: _clean(v) for k, v in rec.items()} for rec in fund.to_dict("records")],
     }
     raw = json.dumps(doc, separators=(",", ":")).encode()
-    with gzip.open(OUT, "wb", compresslevel=9) as fh:
+    with gzip.open(out, "wb", compresslevel=9) as fh:
         fh.write(raw)
     print(f"asof={doc['asof']} prices={prices.shape} fundamentals={len(fund)} "
-          f"raw={len(raw)/1e6:.1f}MB gz={os.path.getsize(OUT)/1e6:.1f}MB "
+          f"raw={len(raw)/1e6:.1f}MB gz={os.path.getsize(out)/1e6:.1f}MB "
           f"fetch_prices={t1-t0:.0f}s fundamentals={t2-t1:.0f}s")
+    return doc
 
 
 if __name__ == "__main__":

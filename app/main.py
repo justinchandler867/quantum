@@ -452,26 +452,21 @@ async def get_diagnostics(req: DiagnosticsRequest):
     warnings = []
     if diag.corr_spike_pct > 40:
         warnings.append(
-            f"Correlation spikes {diag.corr_spike_pct:.0f}% in stress — "
-            f"diversification benefit drops significantly in drawdowns"
+            f"Average pairwise correlation is {diag.avg_corr_stress:.2f} on stress days vs "
+            f"{diag.avg_corr_normal:.2f} on normal days (+{diag.corr_spike_pct:.0f}%)."
         )
     if len(diag.high_corr_pairs_stress) > 0:
         pair_strs = [f"{a}/{b}" for a, b, _ in diag.high_corr_pairs_stress[:3]]
         warnings.append(
-            f"Pairs with stress ρ > 0.85 (effectively no diversification in crisis): "
+            f"Pairs with stress-window ρ above 0.85: "
             + ", ".join(pair_strs)
         )
     if not diag.hedging_pairs and not any(
         v.get("avg_corr_normal", 1) < 0 for v in diag.reference_correlations.values()
     ):
         warnings.append(
-            "No negative-correlation positions — consider adding bond or gold exposure "
-            "for crisis protection"
-        )
-    if len(req.tickers) < 8:
-        warnings.append(
-            f"Only {len(req.tickers)} positions — unsystematic risk is not fully diversified. "
-            f"Consider adding positions to at least 8."
+            "No holding pair has ρ below −0.05, and no reference hedge "
+            f"({', '.join(REFERENCE_HEDGES)}) has a negative average correlation with the holdings."
         )
 
     # Diversification message

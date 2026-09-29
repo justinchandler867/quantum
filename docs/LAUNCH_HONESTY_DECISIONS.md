@@ -222,3 +222,64 @@ Format for each entry: ambiguity, options, choice, reasoning. **24 calls.**
 **K23.** Some copy was not touched: `/api/correlation-diagnostics` still says "consider adding bond or gold exposure…" / "Consider adding positions…", Frontier still shows "Near optimal ✓ / Consider optimizing…", and Correlations shows "No high-correlation pairs — good diversification.". These are now computed from real data but still use advice or verdict vocabulary. They are out of this remediation's scope and listed in DEMO_READINESS.
 
 **K24.** The hidden Trade Desk still renders BUY/SELL from the legacy Sharpe verdict and the sample `tgt`/`stop` fields. It is hidden by `DEMO_MODE`, and its redesign is owned by TRADE_DESK_SPEC.
+
+---
+
+## Part 3: Final pass (2026-09-29), judgment calls L1–L12
+
+**L1. The Sharpe sanity check failed; engine fixed (real error, not annualization).**
+- **Portfolio:** MU/WDC/DELL/HPE at 25% each, 2025-09-25 → 2026-09-25, 252 daily returns, rf 4.3%.
+- **Independent plain numpy** (simple returns, rebalanced to current weights): return +372.33%, volatility 55.84%, **Sharpe 6.5902**.
+- **Engine before the fix:** +321.69%, 55.25%, **Sharpe 5.7442**.
+- **Cause:** the engine built the portfolio series as a weighted sum of *log* returns and compounded it. That is not a portfolio return. It understates returns by ½·(Σwᵢσᵢ² − σ_P²) per day, which compounds to −50 pp here. Build 3's J3 described this approximation as "0.02 pp on a 2% day". That is true for one day and wrong for a year; the correction is recorded here.
+- **Fix:** `select_window` converts the store's log returns to simple returns once. The portfolio series is Σwᵢ·rᵢ (current weights, rebalanced daily), compounded as ∏(1+r), with drawdown on ∏(1+r) and VaR, capture, correlations, the covariance and Sharpe all on simple returns.
+- **After:** the engine gives +372.3293%, 55.8449%, **Sharpe 6.590206**, identical to the independent value.
+- **Tests:** a regression test (high-volatility synthetic portfolio versus plain price arithmetic) pins it.
+
+**L2. Basis choice: rebalanced to current weights, not buy-and-hold.**
+- The panel describes the portfolio at its *current* weights. Rebalanced-to-current-weights is also the convention of the builder's growth chart ("Assumes portfolio rebalanced to current weights").
+- Buy-and-hold from the same start weights gives +345.28% here.
+- The panel header now states the basis: "current weights, rebalanced daily".
+
+**L3. What stays on log returns.**
+- The β chip and β preview (shipped BETA_TRACKER regression on the store's log returns) and the §5 similarity markers (same basis as the Discovery Corr column).
+- For β and correlation the log/simple difference is second order, and changing a sealed prior spec's chip was out of scope.
+
+**L4. Sharpe basis labels.**
+- **Health panel:** "Sharpe (realized, past 252 trading days)", with the tooltip "Realized: what this portfolio at current weights actually earned over the past 252 trading days, per unit of realized volatility. The Frontier tab's Sharpe is a model expectation instead."
+- **Frontier:** "Sharpe (model expectation)" in the info line and table header, with the tooltip "Model expectation: expected return (historical averages over the stored price history) over modeled volatility (blended normal/stress covariance). Portfolio Health's Sharpe is the realized figure for the past 252 trading days instead."
+- The status bar and Compare carry the realized label too.
+
+**L5. Wording scope.**
+- **Changed:** user-facing app copy about the user's own data or profile (analytics, profile flags, optimizer goals, challenges), plus backend strings shown in the UI and one server-log line.
+- **Excluded, and why:**
+  - CFA curriculum text (CourseHub readings and quizzes; `paper_trading.py` concept definitions), where "should" and "optimal" are textbook usage.
+  - Disclaimers that negate a recommendation.
+  - The AI system prompt.
+  - The hidden Trade Desk (TRADE_DESK_SPEC).
+  - Order-type explainers ("Best for: …"), which are instrument education.
+  - Third-party analyst fields in `fundamental.py`, labeled as third-party facts.
+- The regression test scans app copy with exactly these exclusions.
+
+**L6. Optimizer goal descriptions.** The "Good if/Good for …" suffixes were deleted rather than reworded; the goal text states only what the objective computes.
+
+**L7. Holdings-count copy.** The backend warning "Only N positions … Consider adding positions to at least 8." is removed. The Correlations tab now always shows "N holdings; the Portfolio Health panel's effective bets shows X.", following your example.
+
+**L8. Frontier's reference point.** "G pp below the frontier's F% at this volatility" interpolates the frontier's return at the portfolio's own volatility. Outside the frontier's volatility range the line says so. Within 0.005 pp it reads "on the frontier at this volatility".
+
+**L9. Challenge reset.**
+- **Where:** progress lives in `localStorage` (`qx_challenges`). A versioned migration (`qx_challenges_version = "2"`) runs once at page load, before any component reads progress.
+- **What:** it clears everything, including the self-marked "Income Engineer".
+- **Notice:** shown once, dismissible, and only if progress actually existed; a first-time user has nothing to reset.
+- **Implementation:** storage access goes through small try/catch helpers (`_lsGet`/`_lsSet`/`_lsDel`), per the repo's rule on wrapping `localStorage`.
+
+**L10. `refresh_snapshot.py`.**
+- **Design:** wraps `build_market_snapshot.py` (now parameterized by output path). It builds to a temporary file in `app/data/` and validates before an atomic replace: at least 500 tickers, at least 500 fundamentals rows, stress days ≥ `MIN_STRESS_DAYS`, and an as-of date not older than the committed file's. `--check` validates the committed file with no network.
+- **Not run.** Only its validator is exercised by a test, against the committed snapshot.
+
+**L11. DEMO_READINESS rewrite.**
+- **Replaced** with the post-remediation walkthrough, from a fresh browser pass on this branch.
+- **Kept:** the first version's findings, summarized in a "what changed" table (the original stays in git at 06739ea).
+- **Listed as open:** items outside every remediation so far (shared paper account and dead trade log, landing proof block, course placeholders, the ETF filings message, the default "Aggressive" profile).
+
+**L12. Merge readiness.** Merge only if the suite is green and the ranker ordering dump is byte-identical against 855c8e0 (re-measured at the end of this pass).

@@ -140,7 +140,7 @@ def identify_stress_windows(
     if stress_days < MIN_STRESS_DAYS:
         logger.warning(
             f"Only {stress_days} stress days found (minimum {MIN_STRESS_DAYS}). "
-            f"Stress estimates may be unstable. Consider lowering threshold."
+            f"Stress-regime estimates rest on those days only."
         )
 
     return stress_mask
