@@ -367,6 +367,9 @@ function mapScreened(item) {
     sec: item.sector || "Unknown", ret: ret1y, vol: item.volatility || 20,
     beta: item.beta || 1, sh: sh, yld: yld,
     sig: sharpeBand(sh),  // Sharpe band, not a verdict (INTERFACE_VERDICTS_SPEC.md Amendment 1)
+    // Displayed Sharpe: rf-subtracted (same formula as Portfolio Health). `sh`
+    // stays the screener's ranker input and is not what the Sharpe cells show.
+    shRf: item.sharpe_rf ?? null,
     rsi: null, macd: null, tgt: null, stop: null,
     goals: [], rb: [1, 5], hm: 3,
     s08: 0, s20: 0, s22: 0,
@@ -424,18 +427,26 @@ function sharpeMarketLabel(sh, spyRef, isRef){
 }
 // Cell text + factual tooltip for the SHARPE (1Y) column. spyRef = SPY's own
 // 1Y Sharpe for this screen (row-set value, else derived, else null).
+// Displayed Sharpe: screened rows carry shRf ((1Y return − rf) ÷ vol); sample
+// rows and tickers added by symbol carry `sh`, which /api/ticker/add already
+// computes with the risk-free rate subtracted.
+function displaySharpe(a){
+  if(a==null)return null;
+  return a.shRf!==undefined?a.shRf:(a.sh==null?null:a.sh);
+}
 function sharpeCell(a, spyRef){
   const RF=4.3; // risk-free %, matches backend RISK_FREE_RATE (config.py:54)
-  if(a==null||a.sh==null||isNaN(a.sh)||a.vol==null||a.vol<=0)
+  const sh=displaySharpe(a);
+  if(a==null||sh==null||isNaN(sh)||a.vol==null||a.vol<=0)
     return{text:"—",tip:"Insufficient data"};
-  const num=a.sh.toFixed(2);
+  const num=sh.toFixed(2);
   const isRef=(a.id===SPY_REF_TICKER);
-  const label=sharpeMarketLabel(a.sh,spyRef,isRef);
+  const label=sharpeMarketLabel(sh,spyRef,isRef);
   if(label==null)  // Sharpe >= 0 but SPY reference unavailable
     return{text:num+" · —",tip:"1Y Sharpe "+num+". SPY reference unavailable — market comparison not shown."};
   let tip;
   if(isRef)tip="SPY reference row · 1Y Sharpe "+num+". Other names' labels compare to this.";
-  else if(a.sh<0)tip="1Y Sharpe "+num+" — return fell below cash (risk-free "+RF+"%).";
+  else if(sh<0)tip="1Y Sharpe "+num+" — return fell below cash (risk-free "+RF+"%).";
   else tip="1Y Sharpe "+num+" vs SPY "+(spyRef!=null?spyRef.toFixed(2):"—")+" (same 1Y window, same formula).";
   return{text:num+" · "+label,tip:tip};
 }
@@ -527,7 +538,6 @@ let CORR_SEL = null;
 
 const COLORS=["#534AB7","#1D9E75","#BA7517","#185FA5","#993C1D","#3B6D11","#0F6E56","#854F0B","#A32D2D","#0C447C","#3C3489","#085041","#633806","#4B1528"];
 const TC={Stock:"#534AB7",ETF:"#1D9E75",Bond:"#185FA5","Mutual Fund":"#BA7517",Option:"#993C1D",Futures:"#4B1528",REIT:"#A32D2D"};
-const MKT={SPY:{p:"527.84",ch:.82},QQQ:{p:"449.21",ch:1.14},VIX:{p:"18.42",ch:-1.2},"10Y":{p:"4.38%",ch:.04},GLD:{p:"302.17",ch:.44}};
 
 function scoreProfile(a){
   let s=50;
@@ -581,58 +591,56 @@ function cmpRows(a,b,sk,sd){
   return sd===-1 ? -cmp : cmp;
 }
 
-const _cc={};
-function getCorr(a,b){
-  const k=[a,b].sort().join("|");
-  if(!_cc[k]){
-    const ta=ASSETS.find(u=>u.id===a)?.t,tb=ASSETS.find(u=>u.id===b)?.t;
-    const ba=ASSETS.find(u=>u.id===a)?.beta||1,bb=ASSETS.find(u=>u.id===b)?.beta||1;
-    let v;
-    if((ta==="Bond"&&(tb==="Stock"||tb==="ETF"))||((ta==="Stock"||ta==="ETF")&&tb==="Bond"))v=-.12+Math.random()*.08;
-    else if(ta==="Bond"&&tb==="Bond")v=.70+Math.random()*.08;
-    else if(ta===tb)v=.70+Math.random()*.12;
-    else v=Math.max(-.4,Math.min(.95,ba*bb*.42+Math.random()*.08-.04));
-    _cc[k]=+v.toFixed(2);
-  }
-  return _cc[k];
+// Portfolio analytics come ONLY from the backend risk engine
+// (/api/portfolio/health: 252 trading days of market data). There is no local
+// fallback: when the engine cannot compute a number the UI says why and shows
+// "—". (The former getCorr/calcStats/optimizeLocal path built correlations
+// from random numbers and was removed — LAUNCH_HONESTY_DECISIONS.md.)
+const _healthCache=new Map();
+function fetchHealth(weights){
+  const hs=Object.entries(weights||{}).filter(([,w])=>w>0).map(([ticker,weight])=>({ticker,weight}));
+  if(!hs.length)return Promise.resolve(null);
+  const key=JSON.stringify(hs);
+  const hit=_healthCache.get(key);
+  if(hit&&Date.now()-hit.t<120000)return hit.p;
+  const p=apiFetch("/api/portfolio/health",{holdings:hs});
+  _healthCache.set(key,{t:Date.now(),p});
+  p.catch(()=>_healthCache.delete(key));
+  return p;
 }
-
-function calcStats(weights){
-  const ks=Object.keys(weights);if(!ks.length)return null;
-  const rf=.043;let ret=0,beta=0,vol=0;
-  const ws=ks.map(k=>weights[k]/100);
-  ks.forEach((k,i)=>{const a=ASSETS.find(u=>u.id===k)||{};ret+=ws[i]*(a.ret||0)/100;beta+=ws[i]*(a.beta||1);});
-  for(let i=0;i<ks.length;i++)for(let j=0;j<ks.length;j++){const vi=(ASSETS.find(u=>u.id===ks[i])?.vol||20)/100,vj=(ASSETS.find(u=>u.id===ks[j])?.vol||20)/100;vol+=ws[i]*ws[j]*vi*vj*getCorr(ks[i],ks[j]);}
-  vol=Math.sqrt(Math.max(vol,0));
-  const sh=vol>0?(ret-rf)/vol:0,so=vol>0?(ret-rf)/(vol*.72):0,tr=beta>0?(ret-rf)/beta:0;
-  const divY=ks.reduce((a,k,i)=>a+(ASSETS.find(u=>u.id===k)?.yld||0)*ws[i],0);
-  const calmar=ret/Math.max(Math.abs(vol*2.1),.001),infoR=(ret-.242)/Math.max(vol,.001);
-  const s08=ks.reduce((a,k,i)=>a+(ASSETS.find(u=>u.id===k)?.s08||0)*ws[i],0);
-  const s20=ks.reduce((a,k,i)=>a+(ASSETS.find(u=>u.id===k)?.s20||0)*ws[i],0);
-  const s22=ks.reduce((a,k,i)=>a+(ASSETS.find(u=>u.id===k)?.s22||0)*ws[i],0);
-  const rc=ks.map((k,i)=>({k,pct:+(ws[i]*(ASSETS.find(u=>u.id===k)?.vol||20)/100/Math.max(vol,.001)*100).toFixed(1)}));
-  return{ret:+(ret*100).toFixed(2),vol:+(vol*100).toFixed(2),sh:+sh.toFixed(3),beta:+beta.toFixed(3),so:+so.toFixed(3),tr:+(tr*100).toFixed(3),var95:+(-(ret/252-1.645*vol/Math.sqrt(252))*100).toFixed(2),var99:+(-(ret/252-2.326*vol/Math.sqrt(252))*100).toFixed(2),cvar95:+(-(ret/252-2.063*vol/Math.sqrt(252))*100).toFixed(2),maxDD:+(-(vol*2.1)*100).toFixed(2),divY:+(divY*100).toFixed(2),variance:+(vol*vol*10000).toFixed(1),calmar:+calmar.toFixed(3),infoR:+infoR.toFixed(3),s08:+s08.toFixed(1),s20:+s20.toFixed(1),s22:+s22.toFixed(1),rc};
+function useHealth(weights){
+  const[st,setSt]=useState({d:null,loading:false,err:null});
+  const wkey=JSON.stringify(weights||{});
+  useEffect(()=>{
+    if(!Object.values(weights||{}).some(w=>w>0)){setSt({d:null,loading:false,err:null});return;}
+    let cancelled=false;setSt(x=>({...x,loading:true,err:null}));
+    fetchHealth(weights).then(d=>{if(!cancelled)setSt({d,loading:false,err:null});})
+      .catch(ex=>{if(!cancelled)setSt({d:null,loading:false,err:ex.message||"failed"});});
+    return()=>{cancelled=true;};
+  },[wkey]);
+  return st;
 }
-
-// Local fallback optimizer (250-trial Monte Carlo — used when backend is unavailable)
-function optimizeLocal(tickers,goal,maxPos){
-  if(!tickers.length)return{};
-  if(tickers.length===1)return{[tickers[0]]:100};
-  let best=null,bestScore=-Infinity;
-  for(let t=0;t<250;t++){
-    let ws=tickers.map(()=>Math.random());
-    const sum=ws.reduce((a,b)=>a+b,0);ws=ws.map(w=>Math.min(w/sum,(maxPos||30)/100));
-    const s2=ws.reduce((a,b)=>a+b,0);ws=ws.map(w=>w/s2);
-    const wo={};tickers.forEach((k,i)=>wo[k]=ws[i]*100);
-    const s=calcStats(wo);if(!s)continue;
-    const sc=goal==="sharpe"?s.sh:goal==="return"?s.ret:goal==="minvol"?-s.vol:-s.vol/Math.max(s.ret,.001);
-    if(sc>bestScore){bestScore=sc;best=[...ws];}
-  }
-  if(!best)best=tickers.map(()=>1/tickers.length);
-  const wo={};tickers.forEach((k,i)=>wo[k]=Math.round(best[i]*100));
-  const tot=Object.values(wo).reduce((a,b)=>a+b,0);wo[tickers[0]]+=100-tot;
-  return wo;
+// Flat readout of the engine payload for the status bar / Compare / Challenges /
+// Ask Quantex context. Every field is null when unavailable (never 0).
+function healthFacts(d){
+  const ok=d&&d.status==="ok";
+  return{
+    ok,
+    vol:ok?d.vol:null,
+    sharpe:ok&&d.sharpe?d.sharpe.sharpe:null,
+    totalReturn:ok&&d.sharpe?d.sharpe.total_return:null,
+    benchReturn:ok&&d.benchmark_sharpe?d.benchmark_sharpe.total_return:null,
+    beta:d&&d.beta!=null?d.beta:null,
+    maxDD:ok&&d.drawdown?d.drawdown.max_dd:null,
+    var95:ok&&d.var?d.var.var:null,
+    cvar95:ok&&d.var?d.var.cvar:null,
+    effBets:ok?d.effective_bets:null,
+    yld:d&&d.yield&&d.yield.yield!=null?d.yield.yield:null,
+    maxRiskShare:ok&&d.risk_rows&&d.risk_rows.length?Math.max(...d.risk_rows.map(r=>r.risk_share==null?0:r.risk_share)):null,
+    excluded:d&&d.excluded?d.excluded.map(x=>x.ticker):[],
+  };
 }
+const fmtPctOrDash=(x,dp)=>x==null?"—":(x*100).toFixed(dp==null?1:dp)+"%";
 
 // Backend optimizer (scipy SLSQP via /api/optimize)
 async function optimizeBackend(tickers, goal, maxPos, riskScore, currentWeights, applyOutlook, returnModel, viewConfidence) {
@@ -775,7 +783,7 @@ function Onboard({onDone,current}){
 }
 
 // ── Discovery ─────────────────────────────────────────────────────────────────
-function Discovery({profile,ports,onAdd}){
+function Discovery({profile,ports,onAdd,dataAsof}){
   const[tf,setTf]=useState("All");
   const[search,setSearch]=useState("");
   // Balanced goal: ranked presentation removed per VALIDATION verdict (DECORATION)
@@ -834,7 +842,7 @@ function Discovery({profile,ports,onAdd}){
   // else derive once per screen via /api/ticker/add (reads the number only — SPY
   // is NOT added to ASSETS). Else stays null -> label falls back to "—".
   const spyInRows=ASSETS.find(x=>x.id===SPY_REF_TICKER);
-  const spyRef=spyInRows?spyInRows.sh:spyRefState;
+  const spyRef=spyInRows?displaySharpe(spyInRows):spyRefState;
   useEffect(()=>{
     if(spyInRows||spyRefState!=null)return;
     let cancelled=false;
@@ -912,7 +920,7 @@ function Discovery({profile,ports,onAdd}){
     setAddingTicker(sym);setAddError(null);
     try{
       const d=await apiFetch("/api/ticker/add",{symbol:sym});
-      ASSETS=[...ASSETS,d];
+      ASSETS=[...ASSETS,{...d,shRf:d.sh}];  // ticker/add's sh is already rf-subtracted
       skipNextSearch.current=true;
       setSearch(sym);
       setSearchResults(null);
@@ -956,6 +964,7 @@ function Discovery({profile,ports,onAdd}){
       e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:9}},
         e("div",null,
           e("div",{className:"card-title"},"GUIDED FUND DISCOVERY"),
+          dataAsof&&e("div",{style:{fontSize:11,color:"#cbd5e1",fontWeight:600,marginBottom:4}},"Prices as of "+dataAsof.asof+(dataAsof.source==="snapshot"?" (market data snapshot)":"")),
           e("div",{style:{fontSize:11,color:"#64748b",lineHeight:1.5}},e("b",{style:{color:"#a5b4fc"}},balancedUnranked?"Shown unranked — screen match added no edge for this profile.":"Ranked by screen match — not a recommendation."),profile?" — "+profile.cat+" · "+profile.goal+" · "+profile.hor:" — complete ① PROFILE first"),
           e("div",{style:{fontSize:11,color:"#64748b",lineHeight:1.5,marginTop:3}},"This ranking reflects how closely each name matches your profile's factor screen. Whether that screen adds value over random selection from the same universe is currently being tested out-of-sample; the interface will show the result either way.")
         ),
@@ -1048,7 +1057,7 @@ function Discovery({profile,ports,onAdd}){
           TH("ret3y","3Y","Total return over each period. One good year is not a track record — compare across horizons."),
           TH("ret5y","5Y","Total return over each period. One good year is not a track record — compare across horizons."),
           TH("maxDD5y","MAX DD (5Y)","Worst peak-to-trough loss over five years. This is what holding it actually felt like."),
-          TH("vol","VOL"),TH("beta","BETA"),TH("sh","SHARPE"),TH("yld","YIELD"),
+          TH("vol","VOL"),TH("beta","BETA"),TH("shRf","SHARPE","1Y Sharpe: (1-year return − risk-free rate) ÷ volatility"),TH("yld","YIELD"),
           TH("pe","P/E"),e("th",null,"NEXT EARNINGS"),
           e("th",null,"DIV GROWTH"),TH("debtEq","DEBT/EQ"),TH("revGrowth","REV GROWTH"),
           e("th",null,"RSI"),
@@ -1083,7 +1092,7 @@ function Discovery({profile,ports,onAdd}){
             e("td",null,a.maxDD5y==null?e("span",{title:"listed less than 5 years"},"—"):e("span",{title:a.ddWindowDays!=null&&a.ddWindowDays<756?"Based on a shorter price history than 5 years ("+a.ddWindowDays+" trading days) — treat as provisional.":undefined},a.maxDD5y.toFixed(1)+"%"+(a.ddWindowDays!=null&&a.ddWindowDays<756?"*":""))),
             e("td",null,a.vol.toFixed(1)+"%"),
             e("td",null,a.beta.toFixed(2)),
-            e("td",{style:{color:a.sh>=1?"#1D9E75":a.sh>=.5?"#f59e0b":"#ef4444",fontWeight:"bold"}},a.sh.toFixed(2)),
+            (()=>{const v=displaySharpe(a);return e("td",{style:{color:v==null?"#64748b":v>=1?"#1D9E75":v>=.5?"#f59e0b":"#ef4444",fontWeight:"bold"}},v==null?"—":v.toFixed(2));})(),
             e("td",null,a.yld.toFixed(1)+"%"),
             e("td",null,a.pe?a.pe.toFixed(1):"—"),
             e("td",{style:earnCellStyle||undefined},earnLabel),
@@ -2188,22 +2197,9 @@ function healthPanelBody(d,weights,opts){
 }
 
 function PortfolioHealth({weights,betaChip}){
-  const[d,setD]=useState(null);
-  const[loading,setLoading]=useState(false);
-  const[err,setErr]=useState(null);
+  const{d,loading,err}=useHealth(weights);
   const[open,setOpen]=useState({});
   const[allCats,setAllCats]=useState(false);
-  const wkey=JSON.stringify(weights);
-  useEffect(()=>{
-    const hs=Object.entries(weights).filter(([,w])=>w>0).map(([ticker,weight])=>({ticker,weight}));
-    if(!hs.length){setD(null);return;}
-    let cancelled=false;setLoading(true);setErr(null);
-    apiFetch("/api/portfolio/health",{holdings:hs})
-      .then(r=>{if(!cancelled)setD(r);})
-      .catch(ex=>{if(!cancelled){setD(null);setErr(ex.message||"failed");}})
-      .finally(()=>{if(!cancelled)setLoading(false);});
-    return()=>{cancelled=true;};
-  },[wkey]);
   return e("div",{className:"card"},
     e("div",{className:"card-title"},"PORTFOLIO HEALTH",loading&&e("span",{className:"spin",style:{marginLeft:6}},"◌")),
     err&&e("div",{style:{fontSize:11,color:"#94a3b8",marginBottom:4}},"History-based metrics unavailable ("+err+") — shown as —."),
@@ -2377,7 +2373,6 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
     finally{setStressLoading(false);}
   };
   const fmtPct=(x,signed)=>{const v=x*100;return (signed&&v>0?"+":"")+v.toFixed(2)+"%";};
-  const stats=tickers.length>0?calcStats(weights):null;
   const total=Object.values(weights).reduce((a,b)=>a+b,0);
   if(!tickers.length)return e(React.Fragment,null,e("div",{className:"card",style:{textAlign:"center",padding:36}},e("div",{style:{fontSize:22,marginBottom:9}},"📊"),e("div",{style:{color:"#475569"}},"No assets yet — go to Discovery and click + to add them here.")),e(PortfolioHealth,{weights}));
   const bandLoN=bandLo!==""&&!isNaN(+bandLo)?+bandLo:null, bandHiN=bandHi!==""&&!isNaN(+bandHi)?+bandHi:null;
@@ -2396,7 +2391,7 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
               e("span",{title:tip,style:{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:"bold",color:"#cbd5e1",cursor:b!=null?"help":"default"}},
                 "Portfolio β "+(betaLoading&&!beta?"…":b!=null?b.toFixed(2):"—")+" · vs "+benchName),
               mkt&&e("span",{style:{fontSize:10,color:"#94a3b8"}},"· "+mkt),
-              bandLbl&&e("span",{style:{fontSize:10,fontWeight:"bold",color:bandLbl.indexOf("In band")===0?"#1D9E75":"#f59e0b"}},"· "+bandLbl)
+              bandLbl&&e("span",{style:{fontSize:10,fontWeight:"bold",color:"#94a3b8"}},"· "+bandLbl)  // neutral for every band state
             ),
             e("div",{style:{display:"flex",alignItems:"center",gap:5,marginTop:6,fontSize:10,color:"#64748b"}},
               e("span",null,"Target band (optional):"),
@@ -2483,14 +2478,18 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
           useOutlook&&e("div",{style:{fontSize:10,color:"#a5b4fc",marginBottom:10,letterSpacing:.3}},"under 2026 Market Outlook"),
           e("div",{style:{fontSize:14,color:"#818cf8",marginTop:6}},e("span",{className:"spin"},"◌")," Working…")
         ),
-        optView==="results"&&(()=>{const g=OPT_GOALS.find(x=>x.id===lastGoal)||{};const bl=lastMeta&&lastMeta.return_model_used==="black_litterman";return e(React.Fragment,null,
+        optView==="results"&&lastMeta&&lastMeta.error&&e(React.Fragment,null,
+          e("div",{className:"warn-box",style:{marginBottom:8}},"Optimization did not run: "+lastMeta.error+" Your weights were not changed."),
+          e("button",{className:"btn btn-p btn-full",onClick:()=>setOptView("picker")},"Back")
+        ),
+        optView==="results"&&!(lastMeta&&lastMeta.error)&&(()=>{const g=OPT_GOALS.find(x=>x.id===lastGoal)||{};const bl=lastMeta&&lastMeta.return_model_used==="black_litterman";return e(React.Fragment,null,
           lastMeta&&e("div",{style:{fontSize:10,color:bl?"#a5b4fc":"#94a3b8",marginBottom:6,padding:"4px 8px",background:bl?"rgba(99,102,241,.1)":"rgba(148,163,184,.06)",border:"1px solid "+(bl?"rgba(99,102,241,.3)":"rgba(148,163,184,.18)"),borderRadius:4,letterSpacing:.3,fontWeight:"bold"}},bl?"◇ Market equilibrium (Black-Litterman)":"◇ Historical averages"),
           bl&&lastMeta.n_days&&e("div",{style:{fontSize:10,color:"#64748b",marginBottom:6,fontStyle:"italic"}},"estimates from "+lastMeta.n_days+" trading days · shrinkage α="+Number(lastMeta.shrinkage_alpha).toFixed(2)),
           lastOutlook&&e("div",{style:{fontSize:10,color:"#a5b4fc",marginBottom:6,padding:"4px 8px",background:"rgba(99,102,241,.1)",border:"1px solid rgba(99,102,241,.3)",borderRadius:4,letterSpacing:.3,fontWeight:"bold"}},"◈ Optimized under 2026 Market Outlook"+(bl?" · views @ "+(CONVICTIONS.find(c=>c[1]===viewConf)||["",0,""])[2]+" pass-through":"")),
           e("div",{style:{fontSize:10,color:"#64748b",marginBottom:3,letterSpacing:.3}},"OPTIMIZED FOR"),
           e("div",{style:{fontSize:13,fontWeight:"bold",color:"#a5b4fc",marginBottom:8}},g.title),
           e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.5,marginBottom:10}},g.result||""),
-          e("div",{style:{fontSize:10,color:"#64748b",marginBottom:10,fontStyle:"italic"}},"See the HOLDINGS and stats panels for the new portfolio."),
+          e("div",{style:{fontSize:10,color:"#64748b",marginBottom:10,fontStyle:"italic"}},"See HOLDINGS and the Portfolio Health panel for the new portfolio."),
           e("button",{className:"btn btn-p btn-full",onClick:()=>setOptView("picker")},"Optimize for something else →")
         );})(),
         profile&&e("div",{className:"info-box",style:{fontSize:10,marginTop:7}},"Profile constraints: max "+profile.maxPos+"% per position · max β "+profile.maxBeta),
@@ -2551,12 +2550,7 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
     ),
     e("div",{className:"builder-right"},
       e(PortfolioHealth,{weights,betaChip}),
-      stats&&e(React.Fragment,null,
-        e("div",{className:"stat-grid"},
-          [["RETURN",(stats.ret>0?"+":"")+stats.ret+"%",stats.ret>=0?"up":"dn"],["VOL σ",stats.vol+"%",""],["SHARPE",stats.sh,stats.sh>=1?"up":stats.sh>=.5?"wa":"dn"],["BETA",stats.beta,""],["SORTINO",stats.so,""],["TREYNOR",stats.tr+"%",""],["VAR 95%",stats.var95+"%","dn"],["MAX DD",stats.maxDD+"%","dn"]].map(([l,v,cls])=>
-            e("div",{key:l,className:"stat-box"},e("div",{className:"stat-lbl"},l),e("div",{className:"stat-val "+cls},v))
-          )
-        ),
+      e(React.Fragment,null,
         e("div",{className:"card"},
           e("div",{className:"card-title"},"ALLOCATION"),
           e("div",{className:"alloc-strip"},tickers.map((k,i)=>e("div",{key:k,className:"alloc-seg",style:{flex:weights[k],background:COLORS[i%COLORS.length]},title:k+" "+weights[k]+"%"}))),
@@ -2581,7 +2575,7 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
                 e("td",{style:{padding:"4px 5px"},className:orphan?"":(a.ret>=0?"up":"dn")},orphan?"—":(a.ret>0?"+":"")+a.ret+"%"),
                 e("td",{style:{padding:"4px 5px"}},orphan?"—":a.vol+"%"),
                 e("td",{style:{padding:"4px 5px"}},orphan?"—":a.beta),
-                e("td",{style:{padding:"4px 5px",color:orphan?"#475569":(a.sh>=1?"#1D9E75":a.sh>=.5?"#f59e0b":"#ef4444")}},orphan?"—":a.sh),
+                (()=>{const v=displaySharpe(a);return e("td",{style:{padding:"4px 5px",color:orphan||v==null?"#475569":(v>=1?"#1D9E75":v>=.5?"#f59e0b":"#ef4444")}},orphan||v==null?"—":v.toFixed(2));})(),
                 e("td",{style:{padding:"4px 5px"}},orphan?"—":a.yld+"%"),
                 e("td",{style:{padding:"4px 5px",fontWeight:"bold",color:fit>=70?"#1D9E75":fit>=45?"#f59e0b":"#ef4444"}},fit)
               );
@@ -2596,54 +2590,14 @@ function PortTab({name,weights,profile,onUpdate,onRemove,onOpt,optLoading}){
 
 // ── Metrics ───────────────────────────────────────────────────────────────────
 function Metrics({weights}){
-  const tickers=Object.keys(weights);
-  const s=tickers.length>0?calcStats(weights):null;
-  if(!s)return e("div",{className:"card",style:{textAlign:"center",padding:32}},e("div",{style:{color:"#475569"}},"Build a portfolio first."));
-  const mktRet=s.beta*24.2,alpha=s.ret-mktRet;
+  // Every figure here comes from the backend risk engine (252 trading days of
+  // market data). The former stat boxes, factor-exposure bars and 2008/2020/2022
+  // rows were computed from random correlations / fixed fields and are removed.
+  const tickers=Object.keys(weights).filter(k=>weights[k]>0);
+  if(!tickers.length)return e("div",{className:"card",style:{textAlign:"center",padding:32}},e("div",{style:{color:"#475569"}},"Build a portfolio first."));
   return e("div",null,
-    e("div",{className:"stat-grid",style:{gridTemplateColumns:"repeat(4,1fr)"}},
-      [["RETURN",(s.ret>0?"+":"")+s.ret+"%",s.ret>=0?"up":"dn"],["VOL σ",s.vol+"%",""],["SHARPE",s.sh,s.sh>=1?"up":s.sh>=.5?"wa":"dn"],["BETA",s.beta,""],["SORTINO",s.so,""],["TREYNOR",s.tr+"%",""],["VARIANCE",s.variance+" bps²",""],["MAX DD",s.maxDD+"%","dn"],["VAR 95%",s.var95+"%","dn"],["VAR 99%",s.var99+"%","dn"],["CVaR 95%",s.cvar95+"%","dn"],["CALMAR",s.calmar,""],["INFO RATIO",s.infoR,""],["DIV YIELD",s.divY+"%",""],["POSITIONS",tickers.length,""],["BENCH RET",mktRet.toFixed(2)+"%",""]].map(([l,v,cls])=>
-        e(StatBox,{key:l,label:l,value:v,cls,stats:s})
-      )
-    ),
-    e("div",{className:"two-col"},
-      e("div",null,
-        e("div",{className:"card"},e("div",{className:"card-title"},"RETURN ATTRIBUTION"),
-          [["Market (β×SPY)",mktRet.toFixed(2)+"%",mktRet>=0],["Alpha",alpha.toFixed(2)+"%",alpha>=0],["Dividend Income",s.divY+"%",true],["Total Return",s.ret+"%",s.ret>=0]].map(([l,v,pos])=>
-            e("div",{key:l,className:"data-row"},e("span",{className:"data-key"},l),e("span",{className:"data-val "+(pos?"up":"dn")},v))
-          )
-        ),
-        e("div",{className:"card"},e("div",{className:"card-title"},"STRESS TESTS"),
-          [["2008 Financial Crisis",s.s08],["2020 COVID Crash",s.s20],["2022 Rate Hike",s.s22]].map(([l,v])=>
-            e("div",{key:l,style:{marginBottom:9}},
-              e("div",{style:{display:"flex",justifyContent:"space-between",marginBottom:3,fontSize:11}},e("span",{style:{color:"#475569"}},l),e("span",{className:v>=0?"up":"dn",style:{fontWeight:"bold"}},(v>0?"+":"")+v.toFixed(1)+"%")),
-              e("div",{style:{height:5,background:"#06090f",borderRadius:3,overflow:"hidden"}},e("div",{style:{width:Math.min(Math.abs(v)/70*100,100)+"%",height:"100%",background:v>=0?"#1D9E75":"#ef4444",borderRadius:3}}))
-            )
-          )
-        )
-      ),
-      e("div",null,
-        e("div",{className:"card"},e("div",{className:"card-title"},"RISK CONTRIBUTION BY ASSET"),
-          s.rc.map((r,i)=>e("div",{key:r.k,className:"bar-row"},
-            e("div",{className:"bar-lbl"},r.k),
-            e("div",{className:"bar-bg"},e("div",{className:"bar-fill",style:{width:Math.min(r.pct,100)+"%",background:COLORS[i%COLORS.length]}})),
-            e("div",{className:"bar-val"},r.pct+"%")
-          ))
-        ),
-        e("div",{className:"card"},e("div",{className:"card-title"},"FACTOR EXPOSURES"),
-          [["Quality",Math.min(tickers.reduce((a,k)=>{const x=ASSETS.find(u=>u.id===k);return a+(x?.sh||0)*(weights[k]/100);},0)/1.5,1),"#1D9E75"],
-           ["Momentum",Math.min(Math.max(s.ret,0)/50,1),"#534AB7"],
-           ["Low Volatility",Math.max(1-s.vol/40,0),"#185FA5"],
-           ["Income/Yield",Math.min(s.divY/8,1),"#BA7517"],
-           ["Market Beta",Math.min(s.beta/2,1),"#993C1D"]
-          ].map(([l,v,c])=>e("div",{key:l,className:"bar-row"},
-            e("div",{className:"bar-lbl"},l),
-            e("div",{className:"bar-bg"},e("div",{className:"bar-fill",style:{width:(v*100).toFixed(0)+"%",background:c}})),
-            e("div",{className:"bar-val",style:{color:c}},(v*100).toFixed(0))
-          ))
-        )
-      )
-    )
+    e("div",{className:"info-box",style:{marginBottom:10}},"Metrics are computed from the last 252 trading days of market data for this portfolio. Historical crisis scenarios live in the builder's Regime Stress Test."),
+    e(PortfolioHealth,{weights})
   );
 }
 
@@ -2655,29 +2609,37 @@ function Correlations({weights,profile,backendOk}){
   const[matTickers,setMatTickers]=useState([]);
   const[diag,setDiag]=useState(null);
   const[loading,setLoading]=useState(false);
+  const[err,setErr]=useState(null);
+  const[diagErr,setDiagErr]=useState(null);
 
-  // Fetch from backend when tickers or regime change
+  // Backend only. No local fallback: a failure is shown with its cause.
   useEffect(()=>{
-    if(tickers.length<2||!backendOk)return;
+    if(tickers.length<2)return;
     let cancelled=false;
-    setLoading(true);
-    Promise.all([
-      apiFetch("/api/correlations",{tickers,regime,window:252}),
-      apiFetch("/api/correlation-diagnostics",{tickers,weights:Object.values(weights).map(w=>w/100)}),
-    ]).then(([corrData,diagData])=>{
-      if(cancelled)return;
-      setMatrix(corrData.matrix);setMatTickers(corrData.tickers);setDiag(diagData);
-    }).catch(()=>{}).finally(()=>{if(!cancelled)setLoading(false);});
+    setLoading(true);setErr(null);setDiagErr(null);setMatrix(null);setMatTickers([]);setDiag(null);
+    const a=apiFetch("/api/correlations",{tickers,regime,window:252})
+      .then(d=>{if(!cancelled){setMatrix(d.matrix);setMatTickers(d.tickers);}})
+      .catch(ex=>{if(!cancelled)setErr(ex.message||"request failed");});
+    const b=apiFetch("/api/correlation-diagnostics",{tickers,weights:Object.values(weights).map(w=>w/100)})
+      .then(d=>{if(!cancelled)setDiag(d);})
+      .catch(ex=>{if(!cancelled)setDiagErr(ex.message||"request failed");});
+    Promise.allSettled([a,b]).then(()=>{if(!cancelled)setLoading(false);});
     return()=>{cancelled=true;};
-  },[tickers.join(","),regime,backendOk]);
+  },[tickers.join(","),regime]);
 
   if(tickers.length<2)return e("div",{className:"card",style:{textAlign:"center",padding:32}},e("div",{style:{color:"#475569"}},"Add at least 2 assets to see correlations."));
 
-  // Use backend matrix if available, otherwise fall back to local
-  const useBackend=matrix&&matTickers.length>0;
-  const displayTickers=useBackend?matTickers:tickers;
+  const regimeBtns=e("div",{style:{display:"flex",gap:3}},
+    ["normal","stress","blended"].map(r=>e("button",{key:r,className:"btn btn-xs"+(regime===r?" btn-p":""),onClick:()=>setRegime(r),style:{textTransform:"capitalize",fontSize:9}},r)));
+  if(!matrix||!matTickers.length)return e("div",{className:"card"},
+    e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
+      e("div",{className:"card-title",style:{marginBottom:0}},"PAIRWISE CORRELATION MATRIX (ρ)",loading&&e("span",{className:"spin",style:{marginLeft:6,fontSize:10}},"◌")),regimeBtns),
+    loading?e("div",{style:{color:"#64748b",fontSize:12}},"Computing from market data…")
+      :e("div",{className:"warn-box"},"Correlations unavailable for the "+regime+" regime: "+(err||"no data returned")+" No correlation numbers are shown in place of market data.")
+  );
+  const displayTickers=matTickers;
   const n=displayTickers.length,cw=Math.max(30,Math.min(54,450/n));
-  const getVal=(i,j)=>useBackend?matrix[i][j]:getCorr(displayTickers[i],displayTickers[j]);
+  const getVal=(i,j)=>matrix[i][j];
 
   const pairs=[];for(let i=0;i<n;i++)for(let j=i+1;j<n;j++)pairs.push({a:displayTickers[i],b:displayTickers[j],r:getVal(i,j)});
   const avg=pairs.reduce((a,p)=>a+p.r,0)/Math.max(pairs.length,1);
@@ -2692,9 +2654,7 @@ function Correlations({weights,profile,backendOk}){
     e("div",{className:"card"},
       e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
         e("div",{className:"card-title",style:{marginBottom:0}},"PAIRWISE CORRELATION MATRIX (ρ)",loading&&e("span",{className:"spin",style:{marginLeft:6,fontSize:10}},"◌")),
-        backendOk&&e("div",{style:{display:"flex",gap:3}},
-          ["normal","stress","blended"].map(r=>e("button",{key:r,className:"btn btn-xs"+(regime===r?" btn-p":""),onClick:()=>setRegime(r),style:{textTransform:"capitalize",fontSize:9}},r))
-        )
+        regimeBtns
       ),
       e("div",{style:{overflowX:"auto"}},
         e("div",{style:{display:"inline-flex",flexDirection:"column",gap:2}},
@@ -2705,6 +2665,7 @@ function Correlations({weights,profile,backendOk}){
           ))
         )
       ),
+      diagErr&&e("div",{className:"warn-box",style:{marginTop:8}},"Stress diagnostics unavailable: "+diagErr),
       diag?e("div",{className:"info-box",style:{marginTop:8}},diag.diversification_message):
       e("div",{className:"info-box",style:{marginTop:8}},"Avg pairwise ρ: "+avg.toFixed(2)+" · High-corr pairs (ρ>0.75): "+pairs.filter(p=>p.r>.75).length+" · Hedging pairs (ρ<0): "+pairs.filter(p=>p.r<-.05).length)
     ),
@@ -2744,55 +2705,36 @@ function Frontier({weights,profile,backendOk}){
   const tickers=Object.keys(weights);
   const[bkData,setBkData]=useState(null);
   const[loading,setLoading]=useState(false);
+  const[err,setErr]=useState(null);
 
-  // Fetch from backend
+  // Backend only (SLSQP on the blended covariance). No local Monte Carlo.
   useEffect(()=>{
-    if(tickers.length<2||!backendOk)return;
+    if(tickers.length<2)return;
     let cancelled=false;
-    setLoading(true);
+    setLoading(true);setErr(null);setBkData(null);
     apiFetch("/api/frontier",{
       tickers,risk_score:profile?.score||null,n_points:80,
       current_weights:Object.fromEntries(tickers.map(t=>[t,weights[t]])),
     }).then(data=>{
       if(!cancelled)setBkData(data);
-    }).catch(()=>{}).finally(()=>{if(!cancelled)setLoading(false);});
+    }).catch(ex=>{if(!cancelled)setErr(ex.message||"request failed");}).finally(()=>{if(!cancelled)setLoading(false);});
     return()=>{cancelled=true;};
-  },[tickers.join(","),backendOk]);
+  },[tickers.join(","),JSON.stringify(weights)]);
 
   if(tickers.length<2)return e("div",{className:"card",style:{textAlign:"center",padding:32}},e("div",{style:{color:"#475569"}},"Add at least 2 assets to compute the efficient frontier."));
+  if(!bkData||!bkData.frontier||!bkData.frontier.length)return e("div",{className:"card"},
+    e("div",{className:"card-title"},"EFFICIENT FRONTIER — RISK / RETURN"),
+    loading?e("div",{style:{color:"#475569"}},e("span",{className:"spin"},"◌")," Computing efficient frontier via SLSQP...")
+      :e("div",{className:"warn-box"},"Efficient frontier unavailable: "+(err||"no frontier returned")+" No frontier is drawn in place of market data."));
 
-  // Local fallback Monte Carlo
-  const localPts=useMemo(()=>{
-    if(bkData)return null; // skip if backend data available
-    const arr=[];
-    for(let t=0;t<150;t++){
-      let ws=tickers.map(()=>Math.random());const sum=ws.reduce((a,b)=>a+b,0);ws=ws.map(w=>w/sum);
-      const wo={};tickers.forEach((k,i)=>wo[k]=ws[i]*100);const s=calcStats(wo);if(s)arr.push({x:s.vol,y:s.ret,sh:s.sh});
-    }
-    return arr;
-  },[tickers.join(","),bkData]);
-
-  const cs=calcStats(weights);
-
-  // Determine data source
-  let pts,maxSh,minVol,source;
-  if(bkData&&bkData.frontier&&bkData.frontier.length>0){
-    pts=bkData.frontier.map(p=>({x:+(p["return"]!=null?p.volatility*100:p.volatility),y:+(p["return"]!=null?p["return"]*100:p.ret),sh:p.sharpe||0}));
-    // Handle both percentage and decimal formats from backend
-    if(pts[0]&&pts[0].x<1)pts=bkData.frontier.map(p=>({x:p.volatility*100,y:p["return"]*100,sh:p.sharpe||0}));
-    maxSh={x:bkData.max_sharpe.volatility*100,y:bkData.max_sharpe["return"]*100,sh:bkData.max_sharpe.sharpe};
-    minVol={x:bkData.min_vol.volatility*100,y:bkData.min_vol["return"]*100,sh:bkData.min_vol.sharpe};
-    source="SLSQP";
-  }else if(localPts&&localPts.length>0){
-    pts=localPts;
-    maxSh=pts.reduce((a,b)=>b.sh>a.sh?b:a,pts[0]);
-    minVol=pts.reduce((a,b)=>b.x<a.x?b:a,pts[0]);
-    source="Monte Carlo";
-  }else{
-    return e("div",{className:"card"},e("div",{style:{color:"#475569"}},loading?e("span",null,e("span",{className:"spin"},"◌")," Computing efficient frontier via SLSQP..."):"Computing..."));
-  }
-
-  if(!cs)return e("div",{className:"card"},e("div",{style:{color:"#475569"}},"Computing..."));
+  const pts=bkData.frontier.map(p=>({x:p.volatility*100,y:p["return"]*100,sh:p.sharpe||0}));
+  const maxSh={x:bkData.max_sharpe.volatility*100,y:bkData.max_sharpe["return"]*100,sh:bkData.max_sharpe.sharpe};
+  const minVol={x:bkData.min_vol.volatility*100,y:bkData.min_vol["return"]*100,sh:bkData.min_vol.sharpe};
+  const source="SLSQP";
+  const cp=bkData.current_portfolio;
+  // "Your Portfolio" = the backend's own evaluation of the current weights on the same inputs.
+  const cs=cp?{vol:+(cp.portfolio_volatility*100).toFixed(2),ret:+(cp.portfolio_return*100).toFixed(2),sh:+cp.sharpe_ratio.toFixed(3)}:null;
+  if(!cs)return e("div",{className:"card"},e("div",{className:"warn-box"},"Your portfolio's position could not be evaluated on the frontier inputs."));
   const xs=pts.map(p=>p.x),ys=pts.map(p=>p.y);
   const xMin=Math.min(...xs,cs.vol)-1,xMax=Math.max(...xs,cs.vol)+1;
   const yMin=Math.min(...ys,cs.ret)-2,yMax=Math.max(...ys,cs.ret)+2;
@@ -2802,7 +2744,7 @@ function Frontier({weights,profile,backendOk}){
     e("div",{className:"card"},
       e("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
         e("div",{className:"card-title",style:{marginBottom:0}},"EFFICIENT FRONTIER — RISK / RETURN"),
-        e("span",{style:{fontSize:9,color:"#334155",padding:"2px 7px",background:"#0d1228",borderRadius:6}},source==="SLSQP"?"⚡ SLSQP Optimizer":"⚠ Monte Carlo (250 trials)")
+        e("span",{style:{fontSize:9,color:"#334155",padding:"2px 7px",background:"#0d1228",borderRadius:6}},"⚡ SLSQP Optimizer")
       ),
       e("div",{style:{overflowX:"auto"}},
         e("svg",{width:"100%",viewBox:"0 0 550 250",style:{display:"block"}},
@@ -2890,16 +2832,20 @@ function TradeDeck({weights,profile}){
 
 // ── Compare ───────────────────────────────────────────────────────────────────
 function Compare({ports}){
+  // Engine metrics only (same 252-day series as Portfolio Health). Hooks are
+  // unconditional: one per portfolio slot.
+  const hA=useHealth(ports.A||{}),hB=useHealth(ports.B||{}),hC=useHealth(ports.C||{});
+  const H={A:hA,B:hB,C:hC};
   const pl=Object.entries(ports).filter(([,w])=>Object.keys(w).length>0);
   if(pl.length<2)return e("div",{className:"card",style:{textAlign:"center",padding:36}},e("div",{style:{fontSize:20,marginBottom:8}},"⇄"),e("div",{style:{color:"#475569"}},"Build at least 2 portfolios to compare them side by side."));
-  const sl=pl.map(([n,w])=>({n,w,s:calcStats(w)}));
+  const sl=pl.map(([n,w])=>({n,w,h:H[n],s:H[n]&&H[n].d?healthFacts(H[n].d):null}));
   const gv=(s,k)=>s?.[k];
-  const gb=(k,hb)=>{const vs=sl.map(x=>gv(x.s,k)).filter(v=>v!=null);return hb?Math.max(...vs):Math.min(...vs);};
+  const gb=(k,hb)=>{const vs=sl.map(x=>gv(x.s,k)).filter(v=>v!=null);return vs.length?(hb?Math.max(...vs):Math.min(...vs)):null;};
+  const P=v=>(v*100).toFixed(1)+"%";
   const groups=[
-    {l:"RETURNS & INCOME",ms:[{k:"ret",l:"Expected Return",f:v=>(v>0?"+":"")+v+"%",hb:true},{k:"divY",l:"Dividend Yield",f:v=>v+"%",hb:true},{k:"infoR",l:"Info Ratio",f:v=>v,hb:true}]},
-    {l:"RISK-ADJUSTED",ms:[{k:"sh",l:"Sharpe",f:v=>v,hb:true},{k:"so",l:"Sortino",f:v=>v,hb:true},{k:"calmar",l:"Calmar",f:v=>v,hb:true},{k:"tr",l:"Treynor",f:v=>v+"%",hb:true}]},
-    {l:"RISK",ms:[{k:"vol",l:"Volatility σ",f:v=>v+"%",hb:false},{k:"beta",l:"Beta",f:v=>v,hb:false},{k:"maxDD",l:"Max Drawdown",f:v=>v+"%",hb:false},{k:"var95",l:"VaR 95%",f:v=>v+"%",hb:false}]},
-    {l:"STRESS TESTS",ms:[{k:"s08",l:"2008 Crisis",f:v=>(v>0?"+":"")+v+"%",hb:true},{k:"s20",l:"2020 COVID",f:v=>(v>0?"+":"")+v+"%",hb:true},{k:"s22",l:"2022 Rate Hike",f:v=>(v>0?"+":"")+v+"%",hb:true}]},
+    {l:"RETURN & INCOME (past 252 trading days)",ms:[{k:"totalReturn",l:"Return",f:v=>(v>0?"+":"")+P(v),hb:true},{k:"yld",l:"Yield (trailing 12m)",f:P,hb:true}]},
+    {l:"RISK-ADJUSTED",ms:[{k:"sharpe",l:"Sharpe",f:v=>v.toFixed(2),hb:true}]},
+    {l:"RISK",ms:[{k:"vol",l:"Volatility σ",f:P,hb:false},{k:"beta",l:"Beta vs SPY",f:v=>v.toFixed(2),hb:false},{k:"maxDD",l:"Max Drawdown",f:P,hb:true},{k:"var95",l:"Worst-5% day (VaR 95%)",f:P,hb:false},{k:"effBets",l:"Effective bets",f:v=>v.toFixed(1),hb:true}]},
   ];
   return e("div",null,
     e("div",{className:"cmp-hdr"},
@@ -2913,7 +2859,7 @@ function Compare({ports}){
           const best=gb(k,hb);
           return e("div",{key:k,className:"cmp-row"},
             e("div",{className:"cmp-lbl"},ml),
-            sl.map(({n,s})=>{const val=gv(s,k);const isW=val!=null&&Math.abs(val-best)<.001;return e("div",{key:n,className:"cmp-cell"+(isW?" cmp-win":"")},val!=null?f(val):"—",isW&&e("span",{style:{fontSize:9,marginLeft:3}},"★"));})
+            sl.map(({n,s,h})=>{const val=gv(s,k);const isW=val!=null&&best!=null&&Math.abs(val-best)<1e-9;return e("div",{key:n,className:"cmp-cell"+(isW?" cmp-win":""),title:h&&h.err?"Unavailable: "+h.err:undefined},h&&h.loading&&val==null?"…":val!=null?f(val):"—",isW&&e("span",{style:{fontSize:9,marginLeft:3}},"★"));})
           );
         })
       ))
@@ -2929,44 +2875,48 @@ function Advisor({profile,ports,activePort}){
   const[msgs,setMsgs]=useState([{r:"ai",t:"Welcome to Quantex AI — powered by Claude.\n\nComplete ① PROFILE first. Assets in Discovery are then ranked by screen match for your specific profile, goal, and time horizon.\n\nAsk me how any metric on this screen is computed or what it means. I explain the analytics — I don't recommend what to buy, sell, or hold."}]);
   const[inp,setInp]=useState("");
   const[loading,setLoading]=useState(false);
-  const[apiKey,setApiKey]=useState(()=>{try{return localStorage.getItem("qx_api_key")||"";}catch(e){return"";}});
-  const[showKey,setShowKey]=useState(false);
+  const[aiOn,setAiOn]=useState(null);  // null=checking, true/false from /api/ai/status
   const br=useRef();
+  const hp=useHealth(ports[activePort]||{});
   useEffect(()=>br.current?.scrollIntoView({behavior:"smooth"}),[msgs]);
-  useEffect(()=>{try{if(apiKey)localStorage.setItem("qx_api_key",apiKey);else localStorage.removeItem("qx_api_key");}catch(e){}},[apiKey]);
+  useEffect(()=>{
+    fetch((BACKEND_URL||"")+"/api/ai/status").then(r=>r.ok?r.json():{enabled:false})
+      .then(d=>setAiOn(!!d.enabled)).catch(()=>setAiOn(false));
+  },[]);
+  const AI_OFF="The AI explainer isn't enabled on this demo.";
 
   const getCtx=()=>{
-    const w=ports[activePort]||{};const s=Object.keys(w).length>0?calcStats(w):null;
-    return "PROFILE: Score "+(profile?.score||"?")+"/100, "+(profile?.cat||"?")+", Goal: "+(profile?.goal||"?")+", Horizon: "+(profile?.hor||"?")+", Equity: "+(profile?.eq||"?")+"%,  Bonds: "+(profile?.bd||"?")+"%, Max Position: "+(profile?.maxPos||"?")+"%, Max Beta: "+(profile?.maxBeta||"?")+", Options Eligible: "+(profile?.optElig?"yes":"no")+".\nPORTFOLIO "+activePort+": "+Object.keys(w).length+" positions: "+Object.entries(w).map(([k,v])=>k+" "+v+"%").join(", ")+".\n"+(s?"Stats: Return "+s.ret+"%, Vol "+s.vol+"%, Sharpe "+s.sh+", Beta "+s.beta+", Sortino "+s.so+", VaR95 "+s.var95+"%, MaxDD "+s.maxDD+"%, DivYield "+s.divY+"%, 2008 stress "+s.s08+"%, 2020 stress "+s.s20+"%, 2022 stress "+s.s22+"%.":" No portfolio data yet.");
+    const w=ports[activePort]||{};const f=hp.d?healthFacts(hp.d):null;
+    const P=v=>v==null?"n/a":(v*100).toFixed(1)+"%";
+    return "PROFILE: Score "+(profile?.score||"?")+"/100, "+(profile?.cat||"?")+", Goal: "+(profile?.goal||"?")+", Horizon: "+(profile?.hor||"?")+", Equity: "+(profile?.eq||"?")+"%,  Bonds: "+(profile?.bd||"?")+"%, Max Position: "+(profile?.maxPos||"?")+"%, Max Beta: "+(profile?.maxBeta||"?")+", Options Eligible: "+(profile?.optElig?"yes":"no")+".\nPORTFOLIO "+activePort+": "+Object.keys(w).length+" positions: "+Object.entries(w).map(([k,v])=>k+" "+v+"%").join(", ")+".\n"+(f&&f.ok?"Stats (past 252 trading days, backend risk engine): Return "+P(f.totalReturn)+", Vol "+P(f.vol)+", Sharpe "+(f.sharpe==null?"n/a":f.sharpe.toFixed(2))+", Beta "+(f.beta==null?"n/a":f.beta.toFixed(2))+", Worst-5% day "+P(f.var95)+", Max drawdown "+P(f.maxDD)+", Yield "+P(f.yld)+".":" Portfolio statistics unavailable.");
   };
 
   const askClaude=async(msg)=>{
+    if(aiOn===false){setMsgs(m=>[...m,{r:"ai",t:AI_OFF}]);return;}
     setLoading(true);
     const sysPrompt="You are an educational explainer for Quantex's analytics. You explain what displayed metrics mean and how they are computed. You never recommend buying, selling, holding, or allocating to any security or strategy, never answer 'what should I do' questions with a course of action, and redirect such questions to how the relevant concept works. You are not a financial adviser and must say so if asked.\n\nCurrent investor context:\n"+getCtx()+"\n\nBe concise (under 200 words). Reference actual portfolio numbers when relevant to explain how a metric is computed. Plain text only, no markdown.";
     try{
-      // Server proxy (Replicate-backed). Direct-API fallback was removed when the
-      // backend switched from direct Anthropic to Replicate — the ⚙ icon's
-      // user-supplied Anthropic key cannot authenticate against Replicate, so the
-      // fallback was Anthropic-specific and no longer applied.
+      // Server proxy (Replicate-backed). The reviewer never sees raw server
+      // payloads or setup instructions — failures render as one plain line.
       const proxyResp=await fetch((BACKEND_URL||"")+"/api/ai/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({system:sysPrompt,message:msg})});
       if(proxyResp.ok){const d=await proxyResp.json();setMsgs(m=>[...m,{r:"ai",t:d.response}]);setLoading(false);return;}
-      const detail=await proxyResp.text();
-      setMsgs(m=>[...m,{r:"ai",t:"AI features are currently unavailable (HTTP "+proxyResp.status+"). "+detail}]);
+      if(proxyResp.status===503){setAiOn(false);setMsgs(m=>[...m,{r:"ai",t:AI_OFF}]);}
+      else setMsgs(m=>[...m,{r:"ai",t:"The AI explainer couldn't answer just now (error "+proxyResp.status+")."}]);
     }catch(err){
-      setMsgs(m=>[...m,{r:"ai",t:"Error: "+err.message}]);
+      setMsgs(m=>[...m,{r:"ai",t:"The AI explainer couldn't be reached."}]);
     }finally{setLoading(false);}
   };
 
   const send=()=>{if(!inp.trim()||loading)return;const u=inp.trim();setInp("");setMsgs(m=>[...m,{r:"usr",t:u}]);askClaude(u);};
   const QUICK=["Walk me through my portfolio's key metrics","Explain my Sharpe ratio","How does hedging work for a portfolio like this?","How does screen match rank assets for my profile?","What does rebalancing do, and what are its tradeoffs?"];
 
+  if(aiOn===false)return e(React.Fragment,null,
+    e("div",{className:"adv-hdr"},"Ask Quantex"),
+    e("div",{style:{padding:"12px",fontSize:12,color:"#94a3b8",lineHeight:1.5}},AI_OFF)
+  );
   return e(React.Fragment,null,
-    e("div",{className:"adv-hdr"},"Ask Quantex",e("div",{style:{display:"flex",alignItems:"center",gap:6}},e("span",{className:"adv-badge"},apiKey?"Claude ✓":"No Key"),e("button",{onClick:()=>setShowKey(!showKey),style:{background:"none",border:"none",color:"#475569",cursor:"pointer",fontSize:11}},"⚙"))),
+    e("div",{className:"adv-hdr"},"Ask Quantex"),
     e("div",{style:{padding:"0 10px 6px",fontSize:10,color:"#64748b",fontStyle:"italic",background:"#0a0e1a"}},"Explains what the analytics are showing — educational, not advice."),
-    showKey&&e("div",{style:{padding:"6px 10px",background:"#06090f",borderBottom:"1px solid #1a2540",fontSize:10}},
-      e("div",{style:{color:"#475569",marginBottom:4}},"Anthropic API Key",e("span",{style:{color:"#334155",marginLeft:4}},"(stored locally, never sent to any server except Anthropic)")),
-      e("input",{type:"password",value:apiKey,onChange:ev=>setApiKey(ev.target.value),placeholder:"sk-ant-...",style:{width:"100%",padding:"4px 7px",background:"#080d1a",border:"1px solid #1a2540",borderRadius:5,color:"#cbd5e1",fontSize:10,fontFamily:"monospace"}})
-    ),
     e("div",{className:"adv-msgs"},
       msgs.map((m,i)=>e("div",{key:i,className:m.r==="ai"?"msg-ai":"msg-user"},e("div",{className:"msg-who"},m.r==="ai"?"CLAUDE":"YOU"),e("div",{className:"msg-text",style:{whiteSpace:"pre-wrap"}},m.t))),
       loading&&e("div",{className:"msg-ai"},e("div",{className:"msg-who"},"CLAUDE"),e("div",{className:"msg-text"},e("span",{className:"spin"},"◌")," Thinking...")),
@@ -2981,55 +2931,6 @@ function Advisor({profile,ports,activePort}){
   );
 }
 
-// ── CFA Education Data ────────────────────────────────────────────────────────
-const CFA_ED={
-  "RETURN":{level:"I",reading:"Portfolio Risk and Return: Part I",formula:"Rp = Σ(wi × Ri)",desc:"Portfolio return is the weighted average of individual asset returns.",work:(s)=>"Your portfolio return of "+s.ret+"% is the sum of each position's return weighted by its allocation. If AAPL is 20% of your portfolio and returned 25%, it contributed 5% (20% × 25%)."},
-  "VOL σ":{level:"I",reading:"Portfolio Risk and Return: Part I",formula:"σp = √(wᵀΣw)",desc:"Portfolio volatility measures total risk. Unlike individual vol, it accounts for diversification through the covariance matrix.",work:(s)=>"Your portfolio vol of "+s.vol+"% is LESS than the weighted average of individual vols because of diversification — correlations between your holdings reduce total risk."},
-  "SHARPE":{level:"I",reading:"Portfolio Risk and Return: Part I",formula:"S = (Rp − Rf) / σp",desc:"Excess return per unit of total risk. Higher is better. Above 1.0 is good, above 2.0 is exceptional.",work:(s)=>"Your Sharpe of "+s.sh+" = ("+s.ret+"% − 4.3%) / "+s.vol+"%. You earn "+s.sh+" units of excess return for each unit of risk. "+(s.sh>=1?"This is above 1.0 — solid risk-adjusted performance.":"Below 1.0 — consider optimizing to improve risk-adjusted returns.")},
-  "BETA":{level:"I",reading:"Portfolio Risk and Return: Part II",formula:"βp = Σ(wi × βi)",desc:"Portfolio sensitivity to market moves. β=1.0 means you move with the market. β>1 amplifies, β<1 dampens.",work:(s)=>"Your beta of "+s.beta+" means if the market moves 10%, your portfolio moves approximately "+(s.beta*10).toFixed(1)+"%. "+(s.beta>1.2?"High beta — more aggressive than the market.":s.beta<0.8?"Low beta — defensive positioning.":"Near-market sensitivity.")},
-  "SORTINO":{level:"II",reading:"Portfolio Risk and Return: Part II",formula:"Sortino = (Rp − Rf) / σ_downside",desc:"Like Sharpe but only penalizes downside volatility. Upside volatility is desirable — Sortino doesn't count it against you.",work:(s)=>"Your Sortino of "+s.so+" uses only negative returns in the denominator. Compare to your Sharpe of "+s.sh+" — if Sortino is higher, your volatility is skewed positive (more up moves than down)."},
-  "TREYNOR":{level:"I",reading:"Portfolio Risk and Return: Part II",formula:"T = (Rp − Rf) / βp",desc:"Excess return per unit of systematic (market) risk. Unlike Sharpe, ignores diversifiable risk.",work:(s)=>"Your Treynor of "+s.tr+"% = ("+s.ret+"% − 4.3%) / "+s.beta+". This measures how well you're compensated for market risk specifically, not total risk."},
-  "VAR 95%":{level:"II",reading:"Measuring and Managing Market Risk",formula:"VaR₉₅ = −(μ − 1.645σ) [daily]",desc:"Maximum expected daily loss with 95% confidence. 5% of days could be worse than this.",work:(s)=>"Your daily VaR of "+s.var95+"% means on 95% of days, your loss won't exceed "+s.var95+"% of portfolio value. On a $100K portfolio, that's $"+(s.var95*1000).toFixed(0)+"/day max expected loss."},
-  "VAR 99%":{level:"II",reading:"Measuring and Managing Market Risk",formula:"VaR₉₉ = −(μ − 2.326σ) [daily]",desc:"Maximum expected daily loss with 99% confidence. Only 1% of days should be worse.",work:(s)=>"Your 99% VaR of "+s.var99+"% is stricter than the 95% VaR of "+s.var95+"%. On a $100K portfolio: $"+(s.var99*1000).toFixed(0)+"/day. The gap between them reveals tail risk."},
-  "CVaR 95%":{level:"II",reading:"Measuring and Managing Market Risk",formula:"CVaR = E[Loss | Loss > VaR]",desc:"Expected Shortfall — the average loss in the worst 5% of scenarios. Captures tail risk better than VaR.",work:(s)=>"Your CVaR of "+s.cvar95+"% is worse than VaR of "+s.var95+"% because CVaR asks: 'When things go bad, HOW bad?' VaR just marks the threshold; CVaR measures the depth."},
-  "MAX DD":{level:"I",reading:"Portfolio Risk and Return: Part I",formula:"MDD = (Trough − Peak) / Peak",desc:"Worst peak-to-trough decline. The most pain an investor would have experienced.",work:(s)=>"Your max drawdown of "+s.maxDD+"% means at worst, the portfolio fell "+Math.abs(s.maxDD).toFixed(1)+"% from its high. On $100K, that's a $"+Math.abs(s.maxDD*1000).toFixed(0)+" paper loss before recovery."},
-  "CALMAR":{level:"II",reading:"Portfolio Management",formula:"Calmar = Ann. Return / |Max DD|",desc:"Return per unit of drawdown risk. Higher means better recovery relative to worst decline.",work:(s)=>"Your Calmar of "+s.calmar+" = "+s.ret+"% / "+Math.abs(s.maxDD).toFixed(1)+"%. "+(s.calmar>1?"Above 1.0 — your returns more than compensate for the worst drawdown.":"Below 1.0 — the drawdown was larger than your return.")},
-  "INFO RATIO":{level:"II",reading:"Active Portfolio Management",formula:"IR = (Rp − Rb) / σ(Rp − Rb)",desc:"Active return per unit of tracking error. Measures skill of active management vs benchmark.",work:(s)=>"Your IR of "+s.infoR+" measures excess return over the S&P 500 per unit of deviation from it. IR > 0.5 is considered skilled. IR < 0 means you'd have been better in an index fund."},
-  "DIV YIELD":{level:"I",reading:"Equity Valuation",formula:"Yield = Annual Dividends / Price",desc:"Income generated per dollar invested. Higher yield = more income, but very high yields can signal risk.",work:(s)=>"Your portfolio yields "+s.divY+"%. On $100K invested, that's ~$"+(s.divY*1000).toFixed(0)+"/year in dividend income before taxes."},
-  "VARIANCE":{level:"I",reading:"Portfolio Risk and Return: Part I",formula:"σ² = wᵀΣw",desc:"Variance is volatility squared. The raw measure of dispersion. Useful in optimization math.",work:(s)=>"Your variance of "+s.variance+" bps² = ("+s.vol+"%)². Portfolio variance benefits from diversification — it's less than the weighted sum of individual variances."},
-};
-
-// CFA Explainer popup component
-function CfaExplainer({concept,stats,onClose}){
-  const d=CFA_ED[concept];
-  if(!d)return null;
-  return e("div",{className:"edu-pop",onClick:ev=>ev.stopPropagation()},
-    e("button",{className:"edu-close",onClick:onClose},"✕"),
-    e("div",{style:{display:"flex",alignItems:"center",gap:6,marginBottom:6}},
-      e("span",{className:"cfa-tag"},"CFA L"+d.level),
-      e("span",{style:{fontSize:9,color:"#475569"}},d.reading)
-    ),
-    e("div",{style:{fontSize:13,fontWeight:"bold",color:"#f1f5f9",marginBottom:4}},concept),
-    e("div",{className:"edu-formula"},d.formula),
-    e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.6}},d.desc),
-    stats&&d.work&&e("div",{className:"edu-worked"},
-      e("div",{style:{fontSize:9,fontWeight:"bold",color:"#60a5fa",marginBottom:4,letterSpacing:1}},"YOUR PORTFOLIO"),
-      d.work(stats)
-    )
-  );
-}
-
-// Stat box with (?) icon
-function StatBox({label,value,cls,stats}){
-  const[show,setShow]=useState(false);
-  const hasCfa=!!CFA_ED[label];
-  return e("div",{className:"stat-box",style:{position:"relative"}},
-    e("div",{className:"stat-lbl"},label,hasCfa&&e("button",{className:"q-icon",onClick:ev=>{ev.stopPropagation();setShow(!show);}},"?")),
-    e("div",{className:"stat-val "+cls},value),
-    show&&e(CfaExplainer,{concept:label,stats,onClose:()=>setShow(false)})
-  );
-}
-
 // ── Concept Challenges ───────────────────────────────────────────────────────
 function Challenges({profile,ports,activePort}){
   const[completed,setCompleted]=useState(()=>{try{return JSON.parse(localStorage.getItem("qx_challenges")||"[]");}catch(e){return[];}});
@@ -3038,51 +2939,52 @@ function Challenges({profile,ports,activePort}){
 
   const aw=ports[activePort]||{};
   const tickers=Object.keys(aw);
-  const s=tickers.length>0?calcStats(aw):null;
+  // Checks read the backend risk engine (252 trading days); a metric that is
+  // unavailable (null) never satisfies a check.
+  const hs=useHealth(aw);
+  const f=hs.d?healthFacts(hs.d):null;
+  const has=(...xs)=>f&&xs.every(x=>f[x]!=null);
 
   const CHALLENGES=[
     {id:"sharpe_1",title:"Build a Sharpe Machine",level:"L1",topic:"Portfolio Optimization",
      desc:"Build a portfolio with a Sharpe ratio above 1.0 using exactly 8 positions from Discovery. No single position can exceed 20%.",
-     check:()=>s&&s.sh>=1.0&&tickers.length===8&&Object.values(aw).every(w=>w<=20),
+     check:()=>has("sharpe")&&f.sharpe>=1.0&&tickers.length===8&&Object.values(aw).every(w=>w<=20),
      hint:"Focus on high-Sharpe assets like MSFT, COST, LLY. Diversify across sectors to reduce volatility without sacrificing return.",
      explain:"The Sharpe ratio measures excess return per unit of risk. By constraining to 8 positions and 20% max weight, you're forced to diversify. The challenge teaches that Sharpe improves through diversification (reducing σ) not just picking high-return assets.",
      reward:"You demonstrated that diversified portfolio construction produces better risk-adjusted returns than concentration."},
     {id:"beta_target",title:"Beta Commander",level:"L1",topic:"Systematic Risk",
      desc:"Build a portfolio with a beta between 0.70 and 0.80. Use at least 5 positions.",
-     check:()=>s&&s.beta>=0.70&&s.beta<=0.80&&tickers.length>=5,
+     check:()=>has("beta")&&f.beta>=0.70&&f.beta<=0.80&&tickers.length>=5,
      hint:"Mix low-beta defensive stocks (JNJ, PG, GLD) with moderate-beta names. Avoid high-beta tech.",
      explain:"Portfolio beta is the weighted average of individual betas. β < 1 means the portfolio moves less than the market — a defensive stance. This challenge teaches you to control systematic risk through asset selection and weighting.",
      reward:"You built a defensive portfolio that should fall less than the market in downturns while still participating in upside."},
     {id:"income_port",title:"Yield Hunter",level:"L1",topic:"Income Investing",
      desc:"Build a portfolio with a dividend yield above 3.0% while keeping Sharpe above 0.5.",
-     check:()=>s&&s.divY>=3.0&&s.sh>=0.5,
+     check:()=>has("yld","sharpe")&&f.yld>=0.03&&f.sharpe>=0.5,
      hint:"Bond ETFs (HYG), REITs (O, VNQ), and dividend stocks (JNJ, XOM, PG) are your tools. Balance yield with quality.",
      explain:"High yield often comes with high risk or low growth. The constraint on Sharpe > 0.5 forces you to find quality income — not just reach for yield. This mirrors real portfolio construction for income-focused investors.",
      reward:"You balanced income generation with risk-adjusted quality — the core skill for managing retirement portfolios."},
     {id:"low_vol",title:"Calm Waters",level:"L2",topic:"Risk Management",
      desc:"Build a portfolio with annualized volatility below 15% while achieving return above 8%. Use at least 6 positions.",
-     check:()=>s&&s.vol<15&&s.ret>8&&tickers.length>=6,
+     check:()=>has("vol","totalReturn")&&f.vol<0.15&&f.totalReturn>0.08&&tickers.length>=6,
      hint:"This requires genuine diversification. Mix asset classes: bonds, gold (GLD), low-vol stocks (JNJ, PG), and moderate equities. Correlation matters more than individual vol here.",
      explain:"Low portfolio volatility comes from two sources: low-vol assets AND low correlations between them. A 10% vol stock and a 10% vol bond together produce a portfolio with LESS than 10% vol because they don't move together. This is the fundamental insight of Modern Portfolio Theory.",
      reward:"You demonstrated that diversification creates portfolios with less risk than any individual component — the free lunch of finance."},
     {id:"max_drawdown",title:"Drawdown Defender",level:"L2",topic:"Tail Risk",
      desc:"Build a portfolio where the estimated max drawdown is better (less negative) than -25%. Maintain at least 10% expected return.",
-     check:()=>s&&s.maxDD>-25&&s.ret>=10,
+     check:()=>has("maxDD","totalReturn")&&f.maxDD>-0.25&&f.totalReturn>=0.10,
      hint:"Max drawdown is driven by the worst-performing assets in a crisis. Include negative-beta or low-correlation assets (GLD, bonds, TIPS) to cushion drawdowns.",
      explain:"Max drawdown measures the worst peak-to-trough decline — the number that makes investors panic-sell. Managing it requires understanding stress correlations: assets that seem uncorrelated in normal markets can become highly correlated in crashes. True drawdown defense comes from assets that appreciate during crises.",
      reward:"You built a portfolio that limits crisis losses while maintaining attractive returns — the Holy Grail of institutional portfolio management."},
     {id:"risk_parity",title:"Equal Risk Allocator",level:"III",topic:"Risk Parity",
      desc:"Build a portfolio where no single position contributes more than 25% of total portfolio risk. Use at least 6 positions.",
-     check:()=>{
-       if(!s||!s.rc||tickers.length<6)return false;
-       return s.rc.every(r=>r.pct<=25);
-     },
+     check:()=>has("maxRiskShare")&&tickers.length>=6&&f.excluded.length===0&&f.maxRiskShare<=0.25,
      hint:"High-vol assets need smaller weights. If NVDA has 3x the vol of GLD, it should get roughly 1/3 the weight to contribute equal risk. Use the risk contribution bars in the Metrics tab.",
      explain:"Traditional 60/40 portfolios put 60% in stocks and 40% in bonds by capital, but stocks contribute ~90% of risk. Risk parity allocates so each position contributes equally to portfolio risk. This requires smaller weights for volatile assets and larger weights for stable ones.",
      reward:"You applied the risk parity framework used by Bridgewater's All Weather Fund — weighting by risk contribution, not capital."},
     {id:"alpha_gen",title:"Alpha Generator",level:"II",topic:"Active Management",
-     desc:"Build a portfolio that outperforms the benchmark (SPY return of 24.2%) while keeping beta below 1.0.",
-     check:()=>s&&s.ret>24.2&&s.beta<1.0,
+     desc:"Build a portfolio whose return over the past 252 trading days beats SPY's over the same window, while keeping beta below 1.0.",
+     check:()=>has("totalReturn","benchReturn","beta")&&f.totalReturn>f.benchReturn&&f.beta<1.0,
      hint:"This is the definition of alpha — excess return not explained by market exposure. You need high-conviction picks that outperform on their own merits. Look for high Sharpe + low beta.",
      explain:"Alpha = portfolio return − (beta × market return). Positive alpha means you beat the market on a risk-adjusted basis. Achieving alpha with β < 1 means your outperformance comes from stock selection, not just taking more market risk. This is the gold standard of active management.",
      reward:"You generated genuine alpha — outperformance beyond what market exposure explains. This is what hedge fund managers get paid for."},
@@ -3105,7 +3007,7 @@ function Challenges({profile,ports,activePort}){
         setCompleted(prev=>[...prev,c.id]);
       }
     });
-  },[s,tickers.length]);
+  },[hs.d,tickers.length]);
 
   const ch=CHALLENGES[active];
   const isComplete=completed.includes(ch.id)||(ch.check&&ch.check());
@@ -3164,10 +3066,11 @@ function Challenges({profile,ports,activePort}){
               e("div",{style:{fontSize:11,color:"#94a3b8",lineHeight:1.7}},ch.explain)
             )
           ):e("div",null,
-            s&&e("div",{style:{marginBottom:10}},
-              e("div",{style:{fontSize:10,fontWeight:"bold",color:"#475569",letterSpacing:1,marginBottom:6}},"CURRENT PORTFOLIO STATUS"),
+            tickers.length>0&&e("div",{style:{marginBottom:10}},
+              e("div",{style:{fontSize:10,fontWeight:"bold",color:"#475569",letterSpacing:1,marginBottom:6}},"CURRENT PORTFOLIO STATUS · past 252 trading days"),
+              hs.err&&e("div",{style:{fontSize:10,color:"#94a3b8",marginBottom:4}},"Metrics unavailable: "+hs.err),
               e("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
-                [["Positions",tickers.length],["Return",s?s.ret+"%":"—"],["Vol",s?s.vol+"%":"—"],["Sharpe",s?s.sh:"—"],["Beta",s?s.beta:"—"],["Div Yield",s?s.divY+"%":"—"],["Max DD",s?s.maxDD+"%":"—"]].map(([l,v])=>
+                [["Positions",tickers.length],["Return",fmtPctOrDash(f&&f.totalReturn)],["Vol",fmtPctOrDash(f&&f.vol)],["Sharpe",f&&f.sharpe!=null?f.sharpe.toFixed(2):"—"],["Beta",f&&f.beta!=null?f.beta.toFixed(2):"—"],["Yield",fmtPctOrDash(f&&f.yld)],["Max DD",fmtPctOrDash(f&&f.maxDD)]].map(([l,v])=>
                   e("div",{key:l,style:{padding:"3px 8px",background:"#06090f",borderRadius:4,fontSize:10}},e("span",{style:{color:"#475569"}},l+": "),e("span",{style:{fontWeight:"bold"}},v))
                 )
               )
@@ -3213,7 +3116,6 @@ function PaperTrading({backendOk}){
   useEffect(()=>{try{const s=localStorage.getItem("qx_paper");if(s){const d=JSON.parse(s);setCash(d.cash||100000);setPositions(d.positions||{});setTxLog(d.txLog||[]);setNavHistory(d.navHistory||[{t:Date.now(),nav:100000}]);}}catch(e){}},[]);
   useEffect(()=>{try{localStorage.setItem("qx_paper",JSON.stringify({cash,positions,txLog,navHistory}));}catch(e){}},[cash,positions,txLog,navHistory]);
 
-  const getPrice=(tk)=>{const a=ASSETS.find(x=>x.id===tk);return a?a.ret>0?Math.round(100+a.ret*2):Math.round(80+Math.random()*40):null;};
 
   const refreshOrders=async()=>{
     if(!backendOk)return;
@@ -3265,79 +3167,6 @@ function PaperTrading({backendOk}){
 
   const pendingOrders=orders.filter(o=>o.status==="pending");
   const finishedOrders=orders.filter(o=>o.status!=="pending").slice(0,50);
-
-  const executeTrade=async(side)=>{
-    const tk=ticker.toUpperCase().trim();if(!tk||qty<1)return;
-    setLoading(true);setLastMsg("");
-
-    let price=null;
-    // Try backend first
-    if(backendOk){
-      try{
-        const r=await apiFetch("/api/paper/trade",{ticker:tk,side,quantity:qty});
-        if(r.status==="filled"){
-          setLastMsg((side==="buy"?"Bought ":"Sold ")+r.quantity+" "+r.ticker+" @ $"+r.price.toFixed(2));
-          // Refresh from backend
-          try{
-            const sum=await fetch(BACKEND_URL+"/api/paper/summary").then(r=>r.json());
-            setCash(sum.cash);
-          }catch(e){}
-          try{
-            const pos=await fetch(BACKEND_URL+"/api/paper/positions").then(r=>r.json());
-            const p={};pos.forEach(x=>{p[x.ticker]={shares:x.shares,avgCost:x.avg_cost,price:x.current_price,pnl:x.unrealized_pnl,pnlPct:x.unrealized_pnl_pct,weight:x.weight};});
-            setPositions(p);
-          }catch(e){}
-          setTxLog(prev=>[{id:r.id,t:new Date().toLocaleTimeString(),tk:r.ticker,side,qty:r.quantity,price:r.price,total:r.total,status:"filled"},...prev].slice(0,100));
-          setLoading(false);return;
-        }else{
-          setLastMsg("Rejected: "+r.reason);setLoading(false);return;
-        }
-      }catch(e){/* fall through to local */}
-    }
-
-    // Local execution
-    price=getPrice(tk);
-    if(!price){
-      // Try to find in ASSETS by partial match
-      const match=ASSETS.find(a=>a.id.startsWith(tk));
-      if(match)price=Math.round(100+match.ret*1.5);
-    }
-    if(!price){price=Math.round(50+Math.random()*200);} // fallback random for unknown tickers
-
-    if(side==="buy"){
-      const total=price*qty;
-      if(total>cash){setLastMsg("Insufficient cash. Need $"+total.toLocaleString()+", have $"+cash.toLocaleString());setLoading(false);return;}
-      setCash(c=>c-total);
-      setPositions(prev=>{
-        const p={...prev};
-        if(p[tk]){
-          const oldShares=p[tk].shares;const oldCost=p[tk].avgCost;
-          p[tk]={...p[tk],shares:oldShares+qty,avgCost:(oldShares*oldCost+qty*price)/(oldShares+qty),price};
-        }else{
-          p[tk]={shares:qty,avgCost:price,price,pnl:0,pnlPct:0,weight:0,firstBought:new Date().toISOString()};
-        }
-        return p;
-      });
-      setLastMsg("Bought "+qty+" "+tk+" @ $"+price.toFixed(2)+" = $"+(qty*price).toLocaleString());
-    }else{
-      if(!positions[tk]||positions[tk].shares<qty){setLastMsg("Insufficient shares in "+tk);setLoading(false);return;}
-      const total=price*qty;
-      const realized=(price-positions[tk].avgCost)*qty;
-      setCash(c=>c+total);
-      setPositions(prev=>{
-        const p={...prev};
-        p[tk]={...p[tk],shares:p[tk].shares-qty,price};
-        if(p[tk].shares<=0)delete p[tk];
-        return p;
-      });
-      setLastMsg("Sold "+qty+" "+tk+" @ $"+price.toFixed(2)+" (P&L: "+(realized>=0?"+":"")+realized.toFixed(2)+")");
-    }
-    setTxLog(prev=>[{id:Math.random().toString(36).slice(2,8),t:new Date().toLocaleTimeString(),tk,side,qty,price,total:price*qty,status:"filled"},...prev].slice(0,100));
-    // Record NAV
-    const posVal=Object.entries(positions).reduce((a,[k,v])=>a+v.shares*(v.price||v.avgCost),0);
-    setNavHistory(prev=>[...prev,{t:Date.now(),nav:cash+posVal}].slice(-500));
-    setLoading(false);
-  };
 
   // Compute totals
   const posVal=Object.entries(positions).reduce((a,[k,v])=>a+v.shares*(v.price||v.avgCost),0);
@@ -4343,6 +4172,7 @@ function App({user,logout}){
   const[backendOk,setBackendOk]=useState(null); // null=unknown, true/false
   const[optLoading,setOptLoading]=useState(false);
   const[screenError,setScreenError]=useState(null);
+  const[dataAsof,setDataAsof]=useState(null);   // {asof,source} of the data the screen used
 
   useEffect(()=>{try{if(profile)localStorage.setItem("qx_profile",JSON.stringify(profile));else localStorage.removeItem("qx_profile");}catch(e){}},[profile]);
   useEffect(()=>{try{localStorage.setItem("qx_ports",JSON.stringify(ports));}catch(e){}},[ports]);
@@ -4350,7 +4180,7 @@ function App({user,logout}){
   // Check backend health on mount
   useEffect(()=>{
     fetch(BACKEND_URL+"/health",{signal:AbortSignal.timeout(5000)})
-      .then(r=>r.json()).then(()=>setBackendOk(true))
+      .then(r=>r.json()).then(d=>{setBackendOk(true);setMkt(d&&d.market?d.market:null);})
       .catch(()=>setBackendOk(false));
   },[]);
 
@@ -4367,6 +4197,7 @@ function App({user,logout}){
       if(data.shortlist&&data.shortlist.length>0){
         ASSETS=data.shortlist.map(mapScreened);
         setBackendOk(true);
+        setDataAsof(data.prices_asof?{asof:data.prices_asof,source:data.data_source}:null);
       }
     }catch(err){
       console.warn("Screening failed, using fallback assets:",err.message);
@@ -4391,27 +4222,28 @@ function App({user,logout}){
   };
   const updateW=(pn,id,v)=>setPorts(prev=>({...prev,[pn]:{...prev[pn],[id]:v}}));
 
-  // Optimizer: try backend (SLSQP), fall back to local Monte Carlo
+  // Optimizer: backend SLSQP only. On failure the weights are left unchanged and
+  // the cause is returned for display — no locally invented weights.
   const optPort=async(pn,goal,maxPos,applyOutlook,returnModel,viewConfidence)=>{
     const t=Object.keys(ports[pn]);
     if(!t.length)return null;
-    if(backendOk){
-      setOptLoading(true);
-      try{
-        const result=await optimizeBackend(t,goal,maxPos,profile?.score,ports[pn],applyOutlook,returnModel,viewConfidence);
-        setPorts(prev=>({...prev,[pn]:result.weights}));
-        setOptLoading(false);return result.meta;
-      }catch(err){console.warn("Backend optimizer failed, using local:",err.message);}
-      setOptLoading(false);
-    }
-    // Local fallback (Outlook tilts + BL are backend-only; local Monte Carlo ignores them)
-    setPorts(prev=>({...prev,[pn]:optimizeLocal(t,goal,maxPos)}));
-    return null;
+    setOptLoading(true);
+    try{
+      const result=await optimizeBackend(t,goal,maxPos,profile?.score,ports[pn],applyOutlook,returnModel,viewConfidence);
+      setPorts(prev=>({...prev,[pn]:result.weights}));
+      return result.meta;
+    }catch(err){
+      return{error:err.message||"optimizer request failed"};
+    }finally{setOptLoading(false);}
   };
 
   const locked=!profile;
   const aw=ports[ap]||{};
-  const as=Object.keys(aw).length>0?calcStats(aw):null;
+  const aHealth=useHealth(aw);
+  const as=Object.keys(aw).length>0?healthFacts(aHealth.d):null;
+  // Market strip: last closes from the loaded price data, with its as-of date
+  // (/health). Replaces the former hard-coded quote constants.
+  const[mkt,setMkt]=useState(null);
 
   const TABS=[
     {id:"onboard",l:"① PROFILE"+(profile?" · Saved":""),lk:false,done:!!profile},
@@ -4429,25 +4261,32 @@ function App({user,logout}){
   ];
 
   const statusDot=backendOk===true?"🟢":backendOk===false?"🔴":"⟳";
-  const statusTip=backendOk===true?"Backend connected — real data":"Backend offline — using sample data";
+  const statusTip=backendOk===true?"Backend connected":"Backend unreachable";
 
   return e("div",{id:"root"},
     e("div",{className:"topbar"},
       e("div",{className:"logo"},"QUANTEX",e("span",{title:statusTip,style:{fontSize:8,marginLeft:6,cursor:"help"}},statusDot)),
-      e("div",{className:"mkt"},Object.entries(MKT).map(([k,v])=>e("div",{key:k,className:"mkt-item"},e("div",{className:"mkt-lbl"},k),e("div",{className:"mkt-val "+(v.ch>=0?"up":"dn")},v.p)))),
+      e("div",{className:"mkt",title:mkt&&mkt.asof?"Last close in the loaded price data, as of "+mkt.asof:"Market data not loaded"},
+        mkt&&mkt.closes&&Object.keys(mkt.closes).length?Object.entries(mkt.closes).map(([k,v])=>e("div",{key:k,className:"mkt-item"},e("div",{className:"mkt-lbl"},k),e("div",{className:"mkt-val",style:{color:"#cbd5e1"}},v.toFixed(2))))
+          .concat([e("div",{key:"asof",className:"mkt-item"},e("div",{className:"mkt-lbl"},"CLOSE AS OF"),e("div",{className:"mkt-val",style:{color:"#94a3b8"}},mkt.asof))])
+          :e("div",{className:"mkt-item"},e("div",{className:"mkt-lbl"},"MARKET DATA"),e("div",{className:"mkt-val",style:{color:"#64748b"}},"—"))),
       profile?e("div",{style:{display:"flex",alignItems:"center",gap:6}},e("div",{className:"chip",onClick:()=>setTab("onboard"),title:"Update profile"},profile.score+"/100 · "+profile.cat+" · "+profile.goal+" ✎"),e("button",{className:"btn btn-xs",onClick:resetAll,title:"Reset all data",style:{color:"#475569",fontSize:9}},"↺ RESET"),user&&user.name!=="Guest"&&e("span",{style:{fontSize:10,color:"#64748b"}},user.name),logout&&e("button",{className:"btn btn-xs",onClick:logout,style:{color:"#475569",fontSize:9}},"Sign Out")):e("div",{style:{display:"flex",alignItems:"center",gap:6}},e("div",{className:"chip",style:{cursor:"default"}},"Complete ① PROFILE to unlock"),user&&user.name!=="Guest"&&e("span",{style:{fontSize:10,color:"#64748b"}},user.name),logout&&e("button",{className:"btn btn-xs",onClick:logout,style:{color:"#475569",fontSize:9}},"Sign Out"))
     ),
-    screening&&e("div",{style:{padding:"8px 16px",background:"#0d1228",borderBottom:"1px solid #1a2540",fontSize:11,color:"#818cf8"}},e("span",{className:"spin"},"◌")," Screening ~600 securities (S&P 500 + major ETFs + a curated extended list) — this may take 30-60s on first load..."),
-    as&&e("div",{className:"sbar"},
+    screening&&e("div",{style:{padding:"8px 16px",background:"#0d1228",borderBottom:"1px solid #1a2540",fontSize:11,color:"#818cf8"}},e("span",{className:"spin"},"◌")," Screening ~600 securities (S&P 500 + major ETFs + a curated extended list)…"),
+    as&&e("div",{className:"sbar",title:"Past 252 trading days, backend risk engine"+(aHealth.err?" — unavailable: "+aHealth.err:"")},
       e("div",{className:"sb-item",style:{borderRight:"1px solid #1a2540"}},e("div",{className:"sb-lbl"},"PORT "+ap),e("div",{className:"sb-val",style:{color:"#818cf8",fontSize:11}},Object.keys(aw).length+" pos.")),
-      [["RETURN",(as.ret>0?"+":"")+as.ret+"%",as.ret>=0?"up":"dn"],["VOL σ",as.vol+"%",""],["SHARPE",as.sh,as.sh>=1?"up":as.sh>=.5?"wa":"dn"],["BETA",as.beta,""],["SORTINO",as.so,""],["VAR 95%",as.var95+"%","dn"],["DIV YIELD",as.divY+"%",""]].map(([l,v,cls])=>e("div",{key:l,className:"sb-item"},e("div",{className:"sb-lbl"},l),e("div",{className:"sb-val "+cls},v)))
+      [["RETURN 252D",as.totalReturn==null?(aHealth.loading?"…":"—"):(as.totalReturn>0?"+":"")+fmtPctOrDash(as.totalReturn),""],["VOL σ",aHealth.loading&&as.vol==null?"…":fmtPctOrDash(as.vol),""],["SHARPE",as.sharpe==null?"—":as.sharpe.toFixed(2),""],["BETA",as.beta==null?"—":as.beta.toFixed(2),""],["MAX DD",fmtPctOrDash(as.maxDD),""],["VAR 95% 1D",fmtPctOrDash(as.var95),""],["YIELD",fmtPctOrDash(as.yld),""]].map(([l,v,cls])=>e("div",{key:l,className:"sb-item"},e("div",{className:"sb-lbl"},l),e("div",{className:"sb-val "+cls},v)))
     ),
     e("div",{className:"nav"},TABS.map(t=>e("button",{key:t.id,className:"nav-tab"+(tab===t.id?" active":"")+(t.lk?" locked":"")+(t.done?" done":""),onClick:()=>{if(t.lk)return;if(t.pn)setAp(t.pn);setTab(t.id);},title:t.lk?"Complete ① PROFILE first":""},t.l))),
     e("div",{className:"body"},
       e("div",{className:"main"},
-        screenError&&tab==="disco"&&e("div",{className:"warn-box",style:{margin:"0 0 10px"}},"⚠ Backend: "+screenError+" — showing sample data. Start the backend with: uvicorn app.main:app"),
+        // Sample-data banner: shown on every tab whenever the rows on screen are
+        // the built-in illustrative set (screen pending or failed).
+        profile&&ASSETS===FALLBACK_ASSETS&&e("div",{style:{margin:"0 0 12px",padding:"10px 14px",background:"rgba(245,158,11,.12)",border:"1px solid rgba(245,158,11,.55)",borderRadius:8,color:"#fbbf24",fontSize:13,fontWeight:700,letterSpacing:.3}},
+          "SAMPLE DATA: illustrative rows, not live analysis",
+          e("div",{style:{fontSize:11,fontWeight:400,color:"#fcd34d",marginTop:3}},screening?"Loading the market screen…":screenError?"The market screen could not be loaded ("+screenError+").":"")),
         tab==="onboard"&&e(Onboard,{onDone,current:profile}),
-        tab==="disco"&&e(Discovery,{profile,ports,onAdd:togglePort}),
+        tab==="disco"&&e(Discovery,{profile,ports,onAdd:togglePort,dataAsof:ASSETS===FALLBACK_ASSETS?null:dataAsof}),
         tab==="metrics"&&e(Metrics,{weights:aw}),
         tab==="corr"&&e(Correlations,{weights:aw,profile,backendOk}),
         tab==="frontier"&&e(Frontier,{weights:aw,profile,backendOk}),

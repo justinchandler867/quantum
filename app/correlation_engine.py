@@ -127,6 +127,11 @@ def compute_normal_correlation(
     )
 
 
+# Hard floor for a stress-regime estimate (stress days shared by the requested
+# tickers). The failure message names both numbers; the threshold is not lowered.
+MIN_STRESS_OBS = 20
+
+
 def compute_stress_correlation(
     stress_returns: pd.DataFrame,
     tickers: list[str],
@@ -141,10 +146,10 @@ def compute_stress_correlation(
 
     subset = stress_returns[available].dropna()
 
-    if len(subset) < 20:
+    if len(subset) < MIN_STRESS_OBS:
         raise ValueError(
-            f"Only {len(subset)} stress observations — too few for stable estimate. "
-            f"Consider lowering the drawdown threshold."
+            f"Not enough market-stress history to compute this: {len(subset)} stress days "
+            f"available, {MIN_STRESS_OBS} required."
         )
 
     use_shrinkage = SHRINKAGE_ALWAYS_STRESS

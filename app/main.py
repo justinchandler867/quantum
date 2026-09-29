@@ -4,6 +4,7 @@ Correlation, covariance, and diagnostics API endpoints.
 """
 import asyncio
 import json
+import os
 import logging
 import threading
 from contextlib import asynccontextmanager
@@ -106,8 +107,11 @@ logger = logging.getLogger(__name__)
 
 
 # ── Data Store ───────────────────────────────────────────────────────────────
-# Holds pre-fetched returns in memory after startup or first request.
-# In production, replace with a proper database-backed store.
+# Holds price/return frames in memory. At startup it is filled from the
+# committed market snapshot (app/data/market_snapshot.json.gz — same pattern as
+# caps.json) so the first screen needs no network. An optional live refresh
+# (QX_LIVE_REFRESH=1) runs in a background thread and replaces the frames only
+# when it has completed.
 _store = {
     "prices": None,
     "volumes": None,
@@ -118,16 +122,104 @@ _store = {
     # Effective-size cache for Black-Litterman market weights: ticker -> float.
     # Populated lazily by _get_market_caps (marketCap, ETF fallback totalAssets).
     "fundamentals": {},
+    # Screener fundamentals frame (snapshot or live refresh); None -> fetch live.
+    "screen_fundamentals": None,
+    "asof": None,          # last price date in the loaded frames
+    "source": None,        # "snapshot" | "live"
+    "unavailable": set(),  # tickers a fetch returned no usable history for
 }
 _store_lock = threading.Lock()
+
+_SNAPSHOT_PATH = Path(__file__).parent / "data" / "market_snapshot.json.gz"
+
+
+def _naive_dates(df):
+    """yfinance returns exchange-tz-aware dates; the snapshot stores plain dates.
+    Keep one convention (tz-naive calendar dates) so frames can be merged."""
+    if df is not None and getattr(df.index, "tz", None) is not None:
+        df = df.copy()
+        df.index = df.index.tz_localize(None).normalize()
+    return df
+
+
+def _install_frames(prices, volumes, source: str, fundamentals=None) -> None:
+    """Derive returns / stress windows from a price frame and swap them in."""
+    prices, volumes = _naive_dates(prices), _naive_dates(volumes)
+    returns = compute_log_returns(prices)
+    stress_mask = identify_stress_windows(returns)
+    normal_returns, stress_returns = split_returns_by_regime(returns, stress_mask)
+    with _store_lock:
+        _store["prices"] = prices
+        _store["volumes"] = volumes
+        _store["returns"] = returns
+        _store["normal_returns"] = normal_returns
+        _store["stress_returns"] = stress_returns
+        _store["stress_mask"] = stress_mask
+        _store["asof"] = prices.index[-1].strftime("%Y-%m-%d")
+        _store["source"] = source
+        if fundamentals is not None:
+            _store["screen_fundamentals"] = fundamentals
+    logger.info(
+        f"Data installed ({source}, as of {_store['asof']}): {returns.shape[1]} tickers, "
+        f"{returns.shape[0]} days, stress days: {int(stress_mask.sum())}"
+    )
+
+
+def _load_snapshot() -> bool:
+    """Load the committed market snapshot into the store. False if absent/bad."""
+    import gzip
+    import pandas as pd
+    try:
+        with gzip.open(_SNAPSHOT_PATH, "rb") as fh:
+            doc = json.loads(fh.read())
+    except (FileNotFoundError, OSError, json.JSONDecodeError) as exc:
+        logger.warning(f"No usable market snapshot ({exc}); first request will fetch live")
+        return False
+    idx = pd.to_datetime(doc["prices"]["dates"])
+    prices = pd.DataFrame({t: pd.Series(v, index=idx, dtype="float64")
+                           for t, v in doc["prices"]["columns"].items()})
+    volumes = pd.DataFrame({t: pd.Series(v, index=idx) for t, v in doc.get("volumes", {}).items()})
+    volumes = volumes.reindex(index=prices.index, columns=prices.columns).fillna(0)
+    fund = pd.DataFrame(doc["fundamentals"]) if doc.get("fundamentals") else None
+    _install_frames(prices, volumes, "snapshot", fund)
+    # Universe tickers the snapshot builder fetched but could not use (too little
+    # history) are marked unavailable, so the first screen does not re-fetch them.
+    from app.screener import load_nasdaq_tickers
+    _store["unavailable"] = set(load_nasdaq_tickers()) - set(prices.columns)
+    logger.info(f"Market snapshot loaded: as of {doc.get('asof')}, built {doc.get('built')}")
+    return True
+
+
+def _live_refresh() -> None:
+    """Background: re-fetch prices + screener fundamentals; swap in on success only."""
+    from app.screener import fetch_fundamentals, load_nasdaq_tickers
+    try:
+        tickers = sorted(set(list(_store["prices"].columns) if _store["prices"] is not None else [])
+                         | set(load_nasdaq_tickers()) | {BETA_BENCHMARK, "QQQ"})
+        prices, volumes = fetch_prices(tickers, include_hedges=True, return_volumes=True)
+        fund = fetch_fundamentals(load_nasdaq_tickers())
+        if fund is None or len(fund) < 50:
+            raise ValueError(f"live fundamentals incomplete ({0 if fund is None else len(fund)} rows)")
+        _install_frames(prices, volumes, "live", fund)
+        _store["unavailable"] = set(tickers) - set(prices.columns)
+    except Exception as exc:
+        logger.warning(f"Live refresh failed; keeping {_store['source']} data as of {_store['asof']}: {exc}")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: log readiness. Data is loaded lazily on first request."""
-    logger.info("Quantex backend starting — data will load on first request")
+    """Startup: load the market snapshot (fast), then refresh live in the background."""
+    logger.info("Quantex backend starting")
     if not demo_password():
         logger.info("Demo auth gate INACTIVE: DEMO_PASSWORD unset or empty; all routes open")
+    if _store["returns"] is None and os.environ.get("QX_SNAPSHOT_LOAD", "1") != "0":
+        await asyncio.get_running_loop().run_in_executor(None, _load_snapshot)
+    # Live refresh is opt-in: measured in-process it adds ~200 MB RSS (prices
+    # +102, fundamentals +107) on top of the ~290 MB resident snapshot, which
+    # does not fit a 512 MB instance (LAUNCH_HONESTY_DECISIONS.md K15). Without
+    # it the app serves the snapshot, labeled with its as-of date.
+    if os.environ.get("QX_LIVE_REFRESH", "0") == "1":
+        threading.Thread(target=_live_refresh, name="live-refresh", daemon=True).start()
     yield
     logger.info("Quantex backend shutting down")
 
@@ -157,43 +249,44 @@ app.middleware("http")(demo_gate_middleware)
 
 def _ensure_data(tickers: list[str]) -> None:
     """
-    Lazy-load price data and compute returns + stress windows.
-    Caches in memory for the process lifetime.
-    Reloads if new tickers are requested that aren't in the current dataset.
+    Make sure the requested tickers are in the store. Fetches ONLY the tickers
+    that are missing and merges them into the existing frames (the loaded
+    universe is never discarded because one extra ticker was requested).
+    Tickers a fetch could not supply are remembered so they are not re-fetched
+    on every request.
     """
     all_needed = set(tickers + REFERENCE_HEDGES + [BETA_BENCHMARK])
+    if not isinstance(_store.get("unavailable"), set):
+        _store["unavailable"] = set()
 
     if _store["returns"] is not None:
         have = set(_store["returns"].columns)
-        missing = all_needed - have
+        missing = all_needed - have - _store["unavailable"]
         if not missing:
             return
-        logger.info(f"New tickers requested: {missing} — refetching")
+        logger.info(f"New tickers requested: {sorted(missing)} — fetching only these")
+        try:
+            new_p, new_v = fetch_prices(sorted(missing), include_hedges=False, return_volumes=True)
+        except Exception as exc:
+            logger.warning(f"Fetch for {sorted(missing)} failed: {exc}")
+            _store["unavailable"] |= missing
+            return
+        _store["unavailable"] |= (missing - set(new_p.columns))
+        new_p, new_v = _naive_dates(new_p), _naive_dates(new_v)
+        prices = _store["prices"].join(new_p, how="outer").sort_index()
+        volumes = _store["volumes"].join(new_v, how="outer").reindex(index=prices.index).fillna(0)
+        _install_frames(prices, volumes, _store["source"] or "live")
+        return
 
-    # Fetch everything
+    # Nothing loaded (no snapshot): fetch everything requested.
     logger.info(f"Loading price data for {len(all_needed)} tickers...")
     try:
         prices, volumes = fetch_prices(list(all_needed), include_hedges=True, return_volumes=True)
     except Exception as exc:
         logger.error(f"Price fetch failed: {exc}")
         raise HTTPException(status_code=502, detail=f"Failed to fetch price data: {exc}")
-
-    returns = compute_log_returns(prices)
-    stress_mask = identify_stress_windows(returns)
-    normal_returns, stress_returns = split_returns_by_regime(returns, stress_mask)
-
-    with _store_lock:
-        _store["prices"] = prices
-        _store["volumes"] = volumes
-        _store["returns"] = returns
-        _store["normal_returns"] = normal_returns
-        _store["stress_returns"] = stress_returns
-        _store["stress_mask"] = stress_mask
-
-    logger.info(
-        f"Data loaded: {returns.shape[1]} tickers, {returns.shape[0]} days, "
-        f"stress days: {stress_mask.sum()}"
-    )
+    _store["unavailable"] |= (all_needed - set(prices.columns))
+    _install_frames(prices, volumes, "live")
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -202,7 +295,13 @@ def _ensure_data(tickers: list[str]) -> None:
 async def health():
     has_data = _store["returns"] is not None
     n_tickers = _store["returns"].shape[1] if has_data else 0
-    return {"status": "ok", "data_loaded": has_data, "tickers": n_tickers}
+    market = None
+    if has_data:
+        px = _store["prices"]
+        closes = {t: round(float(px[t].dropna().iloc[-1]), 2)
+                  for t in ("SPY", "QQQ", "GLD", "TLT") if t in px.columns and px[t].notna().any()}
+        market = {"asof": _store["asof"], "source": _store["source"], "closes": closes}
+    return {"status": "ok", "data_loaded": has_data, "tickers": n_tickers, "market": market}
 
 
 @app.post("/api/correlations", response_model=CorrelationResponse)
@@ -619,6 +718,9 @@ async def get_prices(req: PricesRequest):
         days = _RANGE_TRADING_DAYS[req.range]
         if days is not None:
             sliced = sliced.tail(days)
+        # The store keeps each ticker's own history (NaN before listing); a
+        # chart needs the dates all requested tickers share.
+        sliced = sliced.dropna()
 
     if sliced.empty:
         raise HTTPException(
@@ -1585,7 +1687,8 @@ async def screen_universe(req: ScreenRequest):
     data fetching. Results are cached.
     """
     ck = cache_key("screen", [req.goal], risk=req.risk_score,
-                   horizon=f"{req.time_horizon_years:.1f}", max=req.max_results)
+                   horizon=f"{req.time_horizon_years:.1f}", max=req.max_results,
+                   asof=_store["asof"], src=_store["source"])
     cached = cache_get(ck)
     if cached:
         return ScreenResponse(**cached)
@@ -1614,6 +1717,9 @@ async def screen_universe(req: ScreenRequest):
                 max_results=req.max_results,
                 tickers=req.tickers,
                 prices=prices,
+                # Snapshot / live-refresh fundamentals when screening the standard
+                # universe; a custom ticker list fetches its own.
+                fundamentals=None if req.tickers else _store["screen_fundamentals"],
             ),
         )
     except ValueError as e:
@@ -1640,6 +1746,7 @@ async def screen_universe(req: ScreenRequest):
                 return_3y=a.return_3y, return_5y=a.return_5y,
                 max_dd_5y=a.max_dd_5y, dd_window_days=a.dd_window_days,
                 pct_off_52wk_high=a.pct_off_52wk_high,
+                sharpe_rf=a.sharpe_rf,
                 z_momentum=a.z_momentum, z_quality=a.z_quality,
                 z_value=a.z_value, z_low_vol=a.z_low_vol, z_yield=a.z_yield,
                 factor_composite=a.factor_composite, fit_score=a.fit_score, rank=a.rank,
@@ -1653,6 +1760,8 @@ async def screen_universe(req: ScreenRequest):
         goal_used=result.goal_used,
         factor_weights=result.factor_weights,
         sector_distribution=result.sector_distribution,
+        prices_asof=_store["asof"],
+        data_source=_store["source"],
     )
 
     # Cache for 18 hours (refreshed daily after market close)
@@ -2130,6 +2239,12 @@ import httpx as _httpx
 
 REPLICATE_MODEL = "anthropic/claude-4.5-sonnet"
 
+@app.get("/api/ai/status")
+async def ai_status():
+    """Whether the server-side AI explainer is configured. Reveals nothing else."""
+    return {"enabled": bool(os.environ.get("REPLICATE_API_TOKEN", ""))}
+
+
 @app.post("/api/ai/chat")
 async def ai_chat(body: dict):
     """
@@ -2249,6 +2364,9 @@ async def portfolio_health_endpoint(req: PortfolioHealthRequest):
     await loop.run_in_executor(None, _ensure_data, list(holdings) + [BETA_BENCHMARK])
     out = _portfolio_health(_store["returns"], holdings, benchmark=BETA_BENCHMARK, rf=RISK_FREE_RATE,
                             window=req.window, min_obs=MIN_OVERLAP_DAYS, capture_min_obs=MIN_OVERLAP_DAYS)
+    # β exactly as /api/portfolio/beta computes it (Challenges, status bar, Compare read it here).
+    out["beta"] = (_vol_beta(_store["returns"], holdings, req.window)["beta"]
+                   if _store["returns"] is not None else None)
     wn = normalize_weights(holdings)
     yields = {}
     for t in wn:

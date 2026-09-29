@@ -346,6 +346,7 @@ class ScreenedAssetResponse(BaseModel):
     max_dd_5y: float | None = None
     dd_window_days: int | None = None
     pct_off_52wk_high: float | None = None
+    sharpe_rf: float | None = None   # display-only, rf-subtracted (see screener._display_sharpe_rf)
     z_momentum: float
     z_quality: float
     z_value: float
@@ -365,6 +366,8 @@ class ScreenResponse(BaseModel):
     goal_used: str
     factor_weights: dict[str, float]
     sector_distribution: dict[str, int]
+    prices_asof: str | None = None      # last price date of the data the screen used
+    data_source: str | None = None      # "snapshot" | "live"
 
 
 # ── Fundamental Analysis Models ──────────────────────────────────────────────

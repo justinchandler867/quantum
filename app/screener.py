@@ -107,6 +107,10 @@ class ScreenedAsset:
     max_dd_5y: float | None = None
     dd_window_days: int | None = None
     pct_off_52wk_high: float | None = None
+    # DISPLAY-ONLY Sharpe with the risk-free rate subtracted, same formula as the
+    # Portfolio Health panel: (exp(sum 252d log r) - 1 - rf) / annualized vol.
+    # The ranker keeps using `sharpe` (no rf) above — this field feeds nothing.
+    sharpe_rf: float | None = None
 
     # Factor z-scores
     z_momentum: float = 0.0
@@ -656,6 +660,7 @@ def run_screening_pipeline(
     max_results: int = SCREEN_FINAL_SIZE,
     tickers: list[str] | None = None,
     prices: pd.DataFrame | None = None,
+    fundamentals: pd.DataFrame | None = None,
 ) -> ScreeningResult:
     """
     Run the full four-stage screening pipeline.
@@ -687,7 +692,13 @@ def run_screening_pipeline(
                 f"risk={risk_score}, horizon={time_horizon_years}yr")
 
     # Stage 1: Fetch fundamentals and apply hard gates
-    fundamentals = fetch_fundamentals(tickers)
+    # A pre-loaded fundamentals frame (market snapshot / background refresh) is
+    # used as-is when given; otherwise fetch live. Data source only — the gates
+    # and scoring below are unchanged.
+    if fundamentals is None:
+        fundamentals = fetch_fundamentals(tickers)
+    else:
+        fundamentals = fundamentals[fundamentals["ticker"].isin(tickers)].reset_index(drop=True)
     gated = apply_hard_gates(fundamentals)
     passed_gates = len(gated)
 
@@ -767,6 +778,7 @@ def run_screening_pipeline(
             max_dd_5y=_safe_round_pct(row.get("max_dd_5y")),
             dd_window_days=_safe_int(row.get("dd_window_days")),
             pct_off_52wk_high=_safe_round_pct(row.get("pct_off_52wk_high")),
+            sharpe_rf=_display_sharpe_rf(row.get("return_1y"), row.get("volatility")),
             z_momentum=round(float(row.get("z_momentum", 0)), 3),
             z_quality=round(float(row.get("z_quality", 0)), 3),
             z_value=round(float(row.get("z_value", 0)), 3),
@@ -790,6 +802,17 @@ def run_screening_pipeline(
         factor_weights=goal_weights,
         sector_distribution=sector_dist,
     )
+
+
+def _display_sharpe_rf(log_ret_1y, ann_vol):
+    """(simple 1Y return - rf) / annualized vol, both decimals. None if unknown."""
+    try:
+        r, v = float(log_ret_1y), float(ann_vol)
+    except (TypeError, ValueError):
+        return None
+    if not (v > 0) or r != r:
+        return None
+    return round((float(np.exp(r)) - 1.0 - RISK_FREE_RATE) / v, 3)
 
 
 def _safe_round(val, decimals=2):

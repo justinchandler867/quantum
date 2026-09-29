@@ -71,8 +71,13 @@ def fetch_prices(
         logger.warning(f"Dropped tickers with insufficient data: {dropped}")
     prices = prices[valid]
 
-    # Forward-fill gaps (up to 5 days for holidays/halts), then drop remaining NaNs
-    prices = prices.ffill(limit=5).dropna()
+    # Forward-fill gaps (up to 5 days for holidays/halts). Keep each ticker's own
+    # history: drop only rows where EVERY ticker is missing. A cross-ticker
+    # dropna() here truncated the whole frame to the youngest admitted listing
+    # (~3y: GEHC/KVUE), which removed the 2022 stress window and left 13 stress
+    # days — below compute_stress_correlation's floor (LAUNCH_HONESTY_DECISIONS.md).
+    # Consumers subset per request and drop NaNs over the tickers they use.
+    prices = prices.ffill(limit=5).dropna(how="all")
 
     logger.info(f"Price matrix: {prices.shape[0]} days × {prices.shape[1]} tickers")
 
@@ -88,7 +93,7 @@ def compute_log_returns(prices: pd.DataFrame) -> pd.DataFrame:
     Compute daily log returns from price DataFrame.
     log return = ln(P_t / P_{t-1})
     """
-    returns = np.log(prices / prices.shift(1)).dropna()
+    returns = np.log(prices / prices.shift(1)).dropna(how="all")
     return returns
 
 
