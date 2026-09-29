@@ -283,3 +283,38 @@ Format for each entry: ambiguity, options, choice, reasoning. **24 calls.**
 - **Listed as open:** items outside every remediation so far (shared paper account and dead trade log, landing proof block, course placeholders, the ETF filings message, the default "Aggressive" profile).
 
 **L12. Merge readiness.** Merge only if the suite is green and the ranker ordering dump is byte-identical against 855c8e0 (re-measured at the end of this pass).
+
+---
+
+## Part 4 (2026-09-29): shared-helper impact check and Paper Trade fix
+
+### H1. Shared helper impact (read-only)
+
+**Code:** `app/portfolio_series.py` (`weighted_portfolio_returns`, `regress_beta`) and `app/discovery_context.py` are unchanged between 933679a and d4d8594. The log-to-simple fix (L1) lives only in `app/portfolio_risk.py` (the Build 3 engine).
+
+**Inputs:** the returns frame these paths read did change (history fix, 93ef8ea). It was measured with each commit's own code, on identical raw prices (the committed snapshot served through a mocked yfinance) and a universe-loaded store. Portfolio: AAPL/MSFT/JNJ/TLT at 25% each.
+
+| Metric | Before (933679a) | After (d4d8594) |
+|---|---|---|
+| Store | 760 rows from 2023-09-15, 13 stress days | 1,251 rows from 2021-10-01, 280 stress days |
+| β / R² / n | 0.4138 / 0.2075 / 252 | same (+0.0000) |
+| NVDA, XOM, GLD corr_normal | 0.1630, −0.1747, 0.1434 | same (+0.0000) |
+| NVDA, XOM, GLD corr_stress | `None` ("no_stress_window", 13 days) | 0.7261, 0.2944, 0.1643 (280 days) |
+| §B last rolling value (2026-09-25) | 0.2558 | 0.2558 (+0.0000) |
+| §B chart span / shaded stress windows | 760 days / 2 | 1,251 days / 6 |
+
+**Conclusion:** trailing-window numbers are identical, because those rows are the same. The stress numbers change from unavailable to computed.
+
+### Paper Trade judgment calls
+
+**P1. Root cause.** The tab's `txLog` and `navHistory` (the source of "Trades", the transaction log and the performance card) were written only by `executeTrade()`. That was the local-simulation path, never called, and removed in launch-honesty. The real path (`submitOrder` → `/api/paper/order`) records the fill on the server (`PaperAccount._transactions`), but the tab only refreshed cash and positions afterwards.
+- **Fix:** `syncFromServer()` loads `/api/paper/transactions` and `/api/paper/nav-history`, using pure mappers `paperTxFromServer` / `paperNavFromServer`. It runs on load, after a fill, and after "Check now" fills. The server account is the source of truth; `localStorage` is only a first paint.
+
+**P2. "Win Rate" → "Filled sells".** The old figure was sells ÷ all fills, not winning trades. The server records no realized P&L per trade, so an honest win rate cannot be computed; the count is shown instead.
+
+**P3. Sharpe on the Paper Trade tab → "—".** NAV is recorded at each trade, not daily, so annualizing snapshot-to-snapshot changes as daily returns is not a Sharpe ratio. The CFA concept line now says so, and max drawdown is labeled "(at trade snapshots)".
+
+**P4. Reset.**
+- "↺ RESET" now calls `/api/paper/reset`, the shared server account. Before, it cleared only the browser copy, and the next sync would have restored it.
+- The confirm text says the account is shared.
+- The label on the tab: "Shared demo account: every visitor sees the same trades. Resets when the server restarts."

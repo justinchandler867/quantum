@@ -3128,6 +3128,22 @@ function Challenges({profile,ports,activePort}){
 }
 
 // ── Paper Trading ─────────────────────────────────────────────────────────────
+// Paper Trade reads the server account as the source of truth. These pure
+// helpers map the server's transaction log / NAV history into the tab's state
+// (tests/test_paper_fix.py).
+function paperTxFromServer(list){
+  return (list||[]).map(t=>({id:t.id,t:t.timestamp?new Date(t.timestamp).toLocaleTimeString():"",tk:t.ticker,side:t.side,qty:t.quantity,price:t.price,total:t.total,status:t.status,reason:t.reason||""}));
+}
+function paperNavFromServer(list,start){
+  const pts=(list||[]).map(h=>({t:Date.parse(h.date),nav:h.nav}));
+  return [{t:pts.length?pts[0].t-1:Date.now(),nav:start||100000}].concat(pts);
+}
+function paperTradeCounts(txLog){
+  const filled=(txLog||[]).filter(t=>t.status==="filled");
+  return{total:filled.length,sells:filled.filter(t=>t.side==="sell").length};
+}
+const PAPER_SHARED_NOTE="Shared demo account: every visitor sees the same trades. Resets when the server restarts.";
+
 function PaperTrading({backendOk}){
   const[cash,setCash]=useState(100000);
   const[positions,setPositions]=useState({});  // ticker → {shares, avgCost, firstBought}
@@ -3163,6 +3179,14 @@ function PaperTrading({backendOk}){
     try{const pos=await fetch(BACKEND_URL+"/api/paper/positions").then(r=>r.json());const p={};pos.forEach(x=>{p[x.ticker]={shares:x.shares,avgCost:x.avg_cost,price:x.current_price,pnl:x.unrealized_pnl,pnlPct:x.unrealized_pnl_pct,weight:x.weight};});setPositions(p);}catch(e){}
   };
 
+  // Pull the shared server account: cash, positions, transaction log, NAV history.
+  const syncFromServer=async()=>{
+    await refreshAccount();
+    try{const tx=await fetch(BACKEND_URL+"/api/paper/transactions?limit=100").then(r=>r.json());if(Array.isArray(tx))setTxLog(paperTxFromServer(tx));}catch(e){}
+    try{const nh=await fetch(BACKEND_URL+"/api/paper/nav-history").then(r=>r.json());if(Array.isArray(nh))setNavHistory(paperNavFromServer(nh,100000));}catch(e){}
+  };
+  useEffect(()=>{syncFromServer();},[]);
+
   const submitOrder=async(side)=>{
     const tk=ticker.toUpperCase().trim();
     if(!tk||qty<1)return;
@@ -3178,7 +3202,7 @@ function PaperTrading({backendOk}){
       else if(r.status==="pending")setLastMsg("Order queued: "+orderType.toUpperCase().replace("_","-")+" "+side.toUpperCase()+" "+qty+" "+tk);
       else if(r.status==="rejected")setLastMsg("Rejected: "+(r.reject_reason||"unknown"));
       await refreshOrders();
-      if(r.status==="filled")await refreshAccount();
+      if(r.status==="filled")await syncFromServer();
     }catch(e){setLastMsg("Error: "+e.message);}
     finally{setLoading(false);}
   };
@@ -3195,7 +3219,7 @@ function PaperTrading({backendOk}){
       const n=(r.changed||[]).length;
       setLastMsg(n>0?n+" order"+(n===1?"":"s")+" updated":"No order updates");
       await refreshOrders();
-      if(n>0)await refreshAccount();
+      if(n>0)await syncFromServer();
     }catch(e){setLastMsg("Check failed: "+e.message);}
     finally{setChecking(false);}
   };
@@ -3216,12 +3240,19 @@ function PaperTrading({backendOk}){
   const dailyRets=[];for(let i=1;i<navs.length;i++)if(navs[i-1]>0)dailyRets.push(navs[i]/navs[i-1]-1);
   const avgRet=dailyRets.length>0?dailyRets.reduce((a,b)=>a+b,0)/dailyRets.length:0;
   const stdRet=dailyRets.length>1?Math.sqrt(dailyRets.reduce((a,r)=>a+(r-avgRet)**2,0)/(dailyRets.length-1)):0;
-  const sharpe=stdRet>0?(avgRet-0.043/252)/stdRet*Math.sqrt(252):0;
+  // NAV is recorded at each trade, not daily: annualizing those snapshot-to-
+  // snapshot changes as daily returns would not be a Sharpe ratio, so none is shown.
   let peak=100000,maxDD=0;navs.forEach(n=>{if(n>peak)peak=n;const dd=(n-peak)/peak;if(dd<maxDD)maxDD=dd;});
-  const winTrades=txLog.filter(t=>t.side==="sell"&&t.status==="filled").length;
-  const totalTrades=txLog.filter(t=>t.status==="filled").length;
+  const counts=paperTradeCounts(txLog);
+  const totalTrades=counts.total;
 
-  const resetAccount=()=>{if(!confirm("Reset paper trading account to $100,000?"))return;setCash(100000);setPositions({});setTxLog([]);setNavHistory([{t:Date.now(),nav:100000}]);setLastMsg("Account reset to $100,000");};
+  const resetAccount=async()=>{
+    if(!confirm("Reset the shared demo account to $100,000? Every visitor uses this account."))return;
+    try{await apiFetch("/api/paper/reset",{});}catch(e){setLastMsg("Reset failed: "+e.message);return;}
+    setCash(100000);setPositions({});setTxLog([]);setNavHistory([{t:Date.now(),nav:100000}]);
+    await refreshOrders();await syncFromServer();
+    setLastMsg("Account reset to $100,000");
+  };
 
   // NAV chart
   const chartW=500,chartH=120,pad=30;
@@ -3247,6 +3278,7 @@ function PaperTrading({backendOk}){
     // Left: Trade Ticket + Account
     e("div",null,
       e("div",{style:{fontSize:10,color:"#fbbf24",background:"rgba(251,191,36,.06)",border:"1px solid rgba(251,191,36,.2)",borderRadius:6,padding:"6px 10px",marginBottom:8,lineHeight:1.5}},"Paper trading — orders do not execute in real markets. Price checks run when you interact with the app; DAY orders may not expire precisely at 4pm ET if you're idle."),
+      e("div",{style:{fontSize:11,fontWeight:700,color:"#e2e8f0",background:"rgba(99,102,241,.12)",border:"1px solid rgba(99,102,241,.45)",borderRadius:6,padding:"7px 10px",marginBottom:8,lineHeight:1.5}},PAPER_SHARED_NOTE),
       e("div",{className:"card"},
         e("div",{className:"card-title"},"TRADE TICKET"),
         e("div",{className:"deriv-input"},e("div",{className:"deriv-lbl"},"TICKER"),e("input",{className:"pt-ticker",value:ticker,onChange:ev=>setTicker(ev.target.value),placeholder:"AAPL",maxLength:6})),
@@ -3315,9 +3347,9 @@ function PaperTrading({backendOk}){
       ),
       e("div",{className:"card"},
         e("div",{className:"card-title"},"PERFORMANCE",e("span",{className:"cfa-tag",style:{marginLeft:6}},"CFA L1")),
-        [["Sharpe Ratio",sharpe.toFixed(3),sharpe>=1?"up":sharpe>=0.5?"wa":"dn"],
-         ["Max Drawdown",(maxDD*100).toFixed(2)+"%","dn"],
-         ["Win Rate",totalTrades>0?(winTrades/totalTrades*100).toFixed(0)+"%":"—",""],
+        [["Sharpe Ratio","—",""],
+         ["Max Drawdown (at trade snapshots)",(maxDD*100).toFixed(2)+"%","dn"],
+         ["Filled sells",counts.sells,""],
          ["Total Trades",totalTrades,""],
         ].map(([l,v,cls])=>e("div",{key:l,style:{display:"flex",justifyContent:"space-between",fontSize:10,padding:"3px 0",borderBottom:"1px solid #0a0f1c"}},e("span",{style:{color:"#475569"}},l),e("span",{className:cls,style:{fontWeight:"bold"}},v)))
       ),
@@ -3402,7 +3434,7 @@ function PaperTrading({backendOk}){
           "This paper trading account tracks concepts tested across CFA Levels I-III:",
           e("div",{style:{marginTop:6}},
             [["TWR vs MWR","L1","Time-weighted return measures strategy skill. Money-weighted measures your actual experience including timing."],
-             ["Sharpe Ratio","L1","Your portfolio's excess return per unit of risk. Computed from your actual daily NAV changes."],
+             ["Sharpe Ratio","L1","Excess return per unit of risk, computed from daily returns. This account records NAV at each trade rather than daily, so no Sharpe ratio is shown here."],
              ["Max Drawdown","L1","The worst peak-to-trough decline. Your pain tolerance in real numbers."],
              ["VWAC Cost Basis","L1","Volume-weighted average cost. Each buy updates this — critical for tax lot accounting."],
              ["Position Sizing","L3","WT % is each position's share of the account — the number concentration is measured on."],
